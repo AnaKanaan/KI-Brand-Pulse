@@ -1,0 +1,14 @@
+domain_type,tld_hints,keyword_hints,example_domains
+news_national,.de;.ch;.at;.fr;.it,news;nachrichten;journal;nationale,spiegel.de;nzz.ch;lemonde.fr;corriere.it;tagesschau.de
+news_regional,.de;.ch;.at,regional;lokal;kanton;provincia,berliner-zeitung.de;basellandschaftlichezeitung.ch;kleinezeitung.at
+trade_media,,industry;branchen;fach;tech;marketing;telecom;energy;medizin;gesundheit;health,heise.de;horizont.net;electrive.net;pv-magazine.com;aerzteblatt.de
+blog,.com;.io;.net,blog;substack;wordpress;medium,medium.com;substack.com;wordpress.com
+corporate,.com;.ch;.de,press;newsroom;investors;about;unternehmen;konzern,siemens.com;openai.com;swisscom.ch;novartis.com
+ngo,.org,ngo;nonprofit;association;foundation,amnesty.org;transparency.org
+gov,.gov;.gouv.fr;.admin.ch;.gv.at,ministerium;bundesamt;official;gouvernement;dipartimento;amt,admin.ch;bund.de;bmf.gv.at;gouvernement.fr
+academic,.edu;.ac.uk;.ch,university;institute;journal;research;paper;preprint,ethz.ch;unil.ch;uni-bonn.de;ox.ac.uk
+social,.com,linkedin;twitter;x;facebook;instagram;youtube;tiktok;reddit,linkedin.com;x.com;facebook.com;instagram.com;youtube.com;reddit.com
+forum,.com,forum;stackexchange;stackoverflow;discourse,reddit.com;stackexchange.com;stackoverflow.com
+aggregator,.com,news aggregator;rss;portal;curation,news.google.com;news.ycombinator.com
+price_compare,.de;.ch;.at;.com,preisvergleich;compare;vergleich;comparatif,idealo.de;geizhals.de;comparis.ch
+other,,,
