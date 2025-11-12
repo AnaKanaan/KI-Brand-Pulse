@@ -1,6 +1,6 @@
 # streamlit_app.py
-# Streamlit-UI mit Event-Queue (keine st.*-Aufrufe im Worker), Start/Abbrechen, ETA/Watchdog,
-# Debug-Panel, Key-Handling (OpenAI/Google/Gemini nur in Session), Modell-Defaults wie gefordert.
+# Streamlit-UI mit Event-Queue, Start/Abbrechen, ETA/Watchdog, Debug-Panel,
+# Key-Handling (OpenAI/Google/Gemini nur in Session), Modell-Defaults wie gefordert.
 
 import os, time, json, threading
 from queue import Queue, Empty
@@ -11,32 +11,32 @@ from ki_rep_monitor import run_pipeline
 st.set_page_config(page_title='KI-Reputation Monitor', layout='wide')
 st.title('🔎 KI-Reputation Monitor — Final3')
 
-# --- Globaler Debug-Schalter (während Run gesperrt) ---
-if "debug_mode" not in st.session_state:
-    st.session_state.debug_mode = False
-if "show_raw" not in st.session_state:
-    st.session_state.show_raw = False
-
-is_running = bool(st.session_state.runner.get("thread") and st.session_state.runner["thread"].is_alive())
-
-st.checkbox("Debug-Modus (Events unten anzeigen)", key="debug_mode", disabled=is_running)
-if st.session_state.debug_mode:
-    st.checkbox("Raw API-Payloads (redigiert)", key="show_raw", disabled=is_running)
-
-# ---- Session-State ----
+# ---------- Session-State: IMMER zuerst initialisieren ----------
 if "runner" not in st.session_state:
     st.session_state.runner = {"thread": None, "cancel": None, "start": None, "run_id": 0}
 if "debug_log" not in st.session_state:
     st.session_state.debug_log = []
 if "last_event_ts" not in st.session_state:
     st.session_state.last_event_ts = 0.0
+if "debug_mode" not in st.session_state:
+    st.session_state.debug_mode = False
+if "show_raw" not in st.session_state:
+    st.session_state.show_raw = False
 
-# Clean up toter Thread
-rt = st.session_state.runner["thread"]
-if rt and not rt.is_alive():
+# toten Thread aufräumen
+_rt = st.session_state.runner["thread"]
+if _rt and not _rt.is_alive():
     st.session_state.runner.update({"thread": None, "cancel": None, "start": None})
 
-# ---------------- API Keys (nur Session) ----------------
+# Status: läuft?
+is_running = bool(st.session_state.runner.get("thread") and st.session_state.runner["thread"].is_alive())
+
+# ---------- Globale Debug-Schalter (während Lauf gesperrt) ----------
+st.checkbox("Debug-Modus (Events unten anzeigen)", key="debug_mode", disabled=is_running)
+if st.session_state.debug_mode:
+    st.checkbox("Raw API-Payloads (redigiert)", key="show_raw", disabled=is_running)
+
+# ---------- API Keys (nur Session) ----------
 with st.expander('🔐 API-Keys (nur Session, keine Speicherung)'):
     openai_key = st.text_input('OpenAI API Key', type='password', placeholder='sk-...')
     google_key = st.text_input('Google API Key (CSE)', type='password', placeholder='AIza...')
@@ -50,7 +50,7 @@ with st.expander('🔐 API-Keys (nur Session, keine Speicherung)'):
         if gemini_key: os.environ['GEMINI_API_KEY'] = gemini_key
         st.success('Keys gesetzt (nur Session).')
 
-# ---------------- Sidebar Controls ----------------
+# ---------- Sidebar Controls ----------
 with st.sidebar:
     brand = st.text_input('Brand', 'DAK')
     topic = st.text_input('Topic', 'KI im Gesundheitswesen')
@@ -73,7 +73,6 @@ with st.sidebar:
 
     st.markdown("---")
     st.markdown("**Model Settings**")
-    # Vorgabe exakt wie gewünscht:
     model_pass_a = st.text_input("Model (Pass A: Antwort)", os.getenv("MODEL_PASS_A", "gpt-5-chat-latest"))
     model_pass_b = st.text_input("Model (Pass B: Codierung)", os.getenv("MODEL_PASS_B", "gpt-5"))
     use_gemini_overview = st.checkbox("Gemini für Overview verwenden (falls GEMINI_API_KEY gesetzt)", value=True)
@@ -81,9 +80,8 @@ with st.sidebar:
     uploaded = st.file_uploader('Question Library (xlsx, optional)', type=['xlsx'])
     question_xlsx = uploaded if uploaded is not None else 'ki_question_library.xlsx'
 
-    # Start/Abbrechen
-    run_btn = st.button('🚀 Run')
-    abort_btn = st.button('⛔ Abbrechen')
+    run_btn = st.button('🚀 Run', disabled=is_running)
+    abort_btn = st.button('⛔ Abbrechen', disabled=not is_running)
 
 def parse_ids(s: str):
     if not s or not s.strip(): return None
@@ -95,27 +93,27 @@ def parse_ids(s: str):
         except: pass
     return out or None
 
-# Abbrechen
+# ---------- Abbrechen ----------
 if abort_btn and st.session_state.runner["cancel"] is not None:
     st.session_state.runner["cancel"].set()
     st.info("Abbruch angefordert – bitte kurz warten …")
 
-# ---------------- Run-Handler ----------------
+# ---------- Run-Handler ----------
 if run_btn:
     if not os.getenv('OPENAI_API_KEY'):
         st.error('Bitte zuerst OpenAI API Key setzen.')
         st.stop()
 
-    # Modell-Overrides → Env (werden in ki_rep_monitor.py gelesen)
+    # Modell-Overrides → Env (werden im Backend gelesen)
     os.environ["MODEL_PASS_A"] = model_pass_a or "gpt-5-chat-latest"
     os.environ["MODEL_PASS_B"] = model_pass_b or "gpt-5"
 
     # Vorherigen Run ggf. abbrechen
-    th = st.session_state.runner["thread"]
-    if th and th.is_alive() and st.session_state.runner["cancel"]:
+    th_prev = st.session_state.runner["thread"]
+    if th_prev and th_prev.is_alive() and st.session_state.runner["cancel"]:
         st.session_state.runner["cancel"].set()
         st.warning("Vorherigen Lauf abgebrochen …")
-        th.join(timeout=2)
+        th_prev.join(timeout=2)
 
     out_name = f'out_{int(time.time())}.xlsx'
 
@@ -127,45 +125,36 @@ if run_btn:
         with open(q_path, 'wb') as f:
             f.write(question_xlsx.getbuffer())
 
-    # Quick-Preview
+    # Quick-Preview + Pre-Run-Filter-Info
     try:
         qdf = pd.read_excel(q_path, sheet_name="Questions")
-        # Pre-Run-Zusammenfassung: Wie viele Fragen bleiben nach Filtern?
-        try:
-            qdf_norm = qdf.copy()
-            qdf_norm.columns = [str(c).strip() for c in qdf_norm.columns]
-            lower = {c.lower(): c for c in qdf_norm.columns}
-            # tolerantes Mapping wie im Backend
-            if "id" in lower:    qdf_norm = qdf_norm.rename(columns={ lower["id"]: "question_id" })
-            if "query" in lower: qdf_norm = qdf_norm.rename(columns={ lower["query"]: "question_text" })
+        st.sidebar.write("Questions sheet columns:", list(qdf.columns))
+        st.sidebar.write("Preview:", qdf.head(3))
 
-            qdf_norm["language"] = qdf_norm["language"].astype(str).str.strip().str.lower()
-            qdf_norm["category"] = qdf_norm["category"].astype(str).str.strip()
-
-            orig = len(qdf_norm)
-            langs = [str(l).strip().lower() for l in languages if str(l).strip()] if languages else None
-            cats  = {str(c).strip().upper() for c in categories if str(c).strip()} if categories else None
-
-            if langs:
-                qdf_norm = qdf_norm[qdf_norm["language"].isin(langs)].copy()
-            if cats:
-                qdf_norm = qdf_norm[qdf_norm["category"].str.upper().isin(cats)].copy()
-
-            if question_ids_raw:
-                ids = [int(x.strip()) for x in question_ids_raw.split(",") if x.strip().isdigit()]
+        # Pre-Run-Zusammenfassung
+        qdf_norm = qdf.copy()
+        qdf_norm.columns = [str(c).strip() for c in qdf_norm.columns]
+        lower = {c.lower(): c for c in qdf_norm.columns}
+        if "id" in lower:    qdf_norm = qdf_norm.rename(columns={ lower["id"]: "question_id" })
+        if "query" in lower: qdf_norm = qdf_norm.rename(columns={ lower["query"]: "question_text" })
+        qdf_norm["language"] = qdf_norm["language"].astype(str).str.strip().str.lower()
+        qdf_norm["category"] = qdf_norm["category"].astype(str).str.strip()
+        orig = len(qdf_norm)
+        langs = [str(l).strip().lower() for l in languages if str(l).strip()] if languages else None
+        cats  = {str(c).strip().upper() for c in categories if str(c).strip()} if categories else None
+        if langs:
+            qdf_norm = qdf_norm[qdf_norm["language"].isin(langs)].copy()
+        if cats:
+            qdf_norm = qdf_norm[qdf_norm["category"].str.upper().isin(cats)].copy()
+        if question_ids_raw:
+            ids = [int(x.strip()) for x in question_ids_raw.split(",") if x.strip().isdigit()]
             if ids:
-                qdf_norm = qdf_norm[qdf_norm["question_id"].isin(ids)].copy()
-
-            st.sidebar.info(f"Fragen nach Filtern: {len(qdf_norm)} / {orig}")
-            st.sidebar.caption(f"Sprachen im Sheet: {sorted(list(set(qdf['language'].astype(str)) ))[:10]}")
-            st.sidebar.caption(f"Kategorien im Sheet: {sorted(list(set(qdf['category'].astype(str)) ))[:10]}")
-        except Exception as e:
-            st.sidebar.warning(f"Pre-Run-Filter-Vorschau nicht möglich: {e}")
-            st.sidebar.write("Questions sheet columns:", list(qdf.columns))
-            st.sidebar.write("Preview:", qdf.head(3))
+                qdf_norm = qdf_norm[qdf_norm["question_id"].astype("Int64").isin(ids)].copy()
+        st.sidebar.info(f"Fragen nach Filtern: {len(qdf_norm)} / {orig}")
+        st.sidebar.caption(f"Sprachen im Sheet: {sorted(list(set(qdf['language'].astype(str))))[:10]}")
+        st.sidebar.caption(f"Kategorien im Sheet: {sorted(list(set(qdf['category'].astype(str))))[:10]}")
     except Exception as e:
-        st.sidebar.error(f"Kann 'Questions' nicht lesen: {e}")
-        st.stop()
+        st.sidebar.warning(f"Pre-Run-Filter-Vorschau nicht möglich: {e}")
 
     # UI-Platzhalter
     status = st.status("Pipeline startet …", state="running")
@@ -174,6 +163,7 @@ if run_btn:
     step_box = st.empty()
     health_box = st.empty()
     stall_warning_box = st.empty()
+
     debug_mode = bool(st.session_state.debug_mode)
     show_raw   = bool(st.session_state.show_raw) if debug_mode else False
     debug_expander = st.expander("🪵 Debug-Protokoll", expanded=False) if debug_mode else None
@@ -204,7 +194,7 @@ if run_btn:
             except Exception: pass
 
         if "eta_s" in meta:
-            eta_box.markdown(f"**ETA:** {_fmt_eta(meta['eta_s'])} min")
+            eta_box.markdown(f"**ETA:** {_fmt_eta(meta['eta_s'])}")
 
         step_box.write(f"**{ev.get('phase','')}** — {ev.get('msg','')}")
 
@@ -323,7 +313,7 @@ if run_btn:
     else:
         status.update(label="Fertig", state="complete")
 
-    # ---------------- Auswertung & Anzeige ----------------
+    # ---------- Auswertung & Anzeige ----------
     xls = pd.ExcelFile(out_name)
     runs = pd.read_excel(xls, 'Runs')
     norm = pd.read_excel(xls, 'Normalized')
