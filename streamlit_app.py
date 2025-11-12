@@ -231,4 +231,56 @@ if run_btn:
     col1.metric('Inclusion Rate', f'{inc*100:.1f}%')
     col2.metric('Sentiment Ø', f'{sent:+.2f}')
     col3.metric('Freshness Index', f'{fresh:.2f}')
-    col4.metric('% Runs mit Belegen',
+    col4.metric('% Runs mit Belegen', f'{ev_rate*100:.1f}%')
+    col5.metric('Domain-Diversität', f'{dom_div}')
+    col6.metric('Positiv-Label Anteil', f'{pos_share*100:.1f}%')
+
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown('**Domain Types**')
+        if not evid.empty and 'domain_type' in evid.columns:
+            dtc = evid['domain_type'].value_counts().reset_index()
+            dtc.columns = ['domain_type','count']
+            st.bar_chart(dtc.set_index('domain_type'))
+        else:
+            st.info('Keine Evidence-Daten.')
+    with c2:
+        st.markdown('**Freshness Buckets**')
+        if not evid.empty and 'freshness_bucket' in evid.columns:
+            fb = evid['freshness_bucket'].value_counts().reindex(['today','≤7d','≤30d','≤90d','≤365d','>365d','unknown']).fillna(0).reset_index()
+            fb.columns = ['bucket','count']
+            st.bar_chart(fb.set_index('bucket'))
+        else:
+            st.info('Keine Evidence-Daten.')
+
+    st.markdown('### Profile × Language — Inclusion Rate')
+    try:
+        inc_pf = norm.assign(incl=norm['inclusion'].fillna(False).astype(bool)).groupby(['profile','language'])['incl'].mean().reset_index()
+        inc_pf['incl'] = (inc_pf['incl']*100).round(1)
+        inc_pf = inc_pf.pivot(index='profile', columns='language', values='incl').fillna(0)
+        st.bar_chart(inc_pf)
+    except Exception:
+        st.info('Nicht genug Daten für Profile×Language.')
+
+    st.markdown('### Sentiment by Profile')
+    try:
+        s_pf = norm.groupby('profile')['aspect_scores.sentiment'].mean().reset_index().set_index('profile')
+        st.bar_chart(s_pf)
+    except Exception:
+        pass
+
+    st.subheader('Runs'); st.dataframe(runs, use_container_width=True, hide_index=True)
+    st.subheader('Evidence'); st.dataframe(evid, use_container_width=True, hide_index=True)
+    st.subheader('Normalized (flattened JSON)'); st.dataframe(norm, use_container_width=True, hide_index=True)
+    st.subheader('Config'); st.table(cfg)
+
+    # Debug-Download am Ende
+    if debug_mode and st.session_state.debug_log:
+        dbg_path = f"/tmp/debug_log_{int(time.time())}.json"
+        with open(dbg_path, "w", encoding="utf-8") as f:
+            json.dump(st.session_state.debug_log, f, ensure_ascii=False, indent=2)
+        with open(dbg_path, "rb") as f:
+            st.download_button("🧾 Debug-Log herunterladen (JSON)", f,
+                               file_name=os.path.basename(dbg_path), mime="application/json")
+else:
+    st.info('Keys setzen (optional), konfigurieren und **Run** starten.')
