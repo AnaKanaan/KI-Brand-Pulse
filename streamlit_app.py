@@ -1,7 +1,6 @@
 import os, time, pandas as pd, streamlit as st
 from ki_rep_monitor import run_pipeline
 
-st.sidebar.write("Questions columns:", list(pd.read_excel(q_path, sheet_name="Questions").columns))
 
 st.set_page_config(page_title='KI-Reputation Monitor', layout='wide')
 st.title('🔎 KI-Reputation Monitor — Final3')
@@ -67,6 +66,8 @@ if run_btn:
         else:
             q_path = f'/tmp/_qlib_{int(time.time())}.xlsx'
             with open(q_path, 'wb') as f: f.write(question_xlsx.getbuffer())
+
+        st.sidebar.write("Questions columns:", list(pd.read_excel(q_path, sheet_name="Questions").columns))
 
         res = run_pipeline(
             brand=brand, topic=topic, market=market,
