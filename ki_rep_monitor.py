@@ -144,13 +144,41 @@ def render_cse_items_for_coder(items):
         lines.append(f"{i}) {e.get('title','')} — {e.get('url', e.get('link',''))} — {domain}")
     return "\\n".join(lines) if lines else "(keine)"
 
+def _canonize_questions_df(q: pd.DataFrame) -> pd.DataFrame:
+    q = q.copy()
+    q.columns = [str(c).strip() for c in q.columns]
+
+    # Tolerantes Mapping: Template nutzt "id" und "query"
+    lower = {c.lower(): c for c in q.columns}
+    cmap = {}
+    if "id" in lower: cmap[lower["id"]] = "question_id"
+    if "query" in lower: cmap[lower["query"]] = "question_text"
+    for want in ["language","category","intent","variant"]:
+        if want not in q.columns and want in lower:
+            cmap[lower[want]] = want
+    q = q.rename(columns=cmap)
+
+    required = ["question_id","question_text","language","category","intent","variant"]
+    missing = [c for c in required if c not in q.columns]
+    if missing:
+        raise KeyError(f"Missing columns in 'Questions': {missing}. Present: {list(q.columns)}")
+
+    # Typen säubern
+    q["question_id"] = pd.to_numeric(q["question_id"], errors="coerce").astype("Int64")
+    q["intent"] = pd.to_numeric(q["intent"], errors="coerce").astype("Int64")
+    q["variant"] = pd.to_numeric(q["variant"], errors="coerce").astype("Int64")
+    q = q.dropna(subset=["question_id","question_text","language"])
+    return q
+
 def run_pipeline(brand, topic, market, languages, profiles, question_xlsx, out_xlsx, domain_seed_csv, coder_prompts_json,
                  topn=5, num_runs=3, categories=None, question_ids=None, comp1="", comp2="", comp3="",
                  temperature_chat_no=0.5, temperature_chat_search=0.25, max_tokens=900, wrapper_mode='free_emulation'):
-    q=pd.read_excel(question_xlsx, sheet_name="Questions")
-    if languages: q=q[q["language"].isin(languages)].copy()
-    if categories: q=q[q["category"].isin(categories)]
-    if question_ids: q=q[q["question_id"].isin(question_ids)]
+    q = pd.read_excel(question_xlsx, sheet_name="Questions")
+    q = _canonize_questions_df(q)
+
+    if languages:  q = q[q["language"].isin(languages)].copy()
+    if categories: q = q[q["category"].isin(categories)]
+    if question_ids: q = q[q["question_id"].isin(question_ids)]
     if q.empty: raise ValueError("Keine Fragen nach Filter übrig.")
 
     prompts=load_coder_prompts(coder_prompts_json)
