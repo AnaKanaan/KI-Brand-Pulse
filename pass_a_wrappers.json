@@ -1,0 +1,22 @@
+{
+  "mode": [
+    "free_emulation",
+    "stabilized"
+  ],
+  "wrappers": {
+    "free_emulation": {
+      "de": "{QUESTION}",
+      "fr": "{QUESTION}",
+      "it": "{QUESTION}",
+      "rm": "{QUESTION}",
+      "en": "{QUESTION}"
+    },
+    "stabilized": {
+      "de": "Beantworte die folgende Frage präzise und knapp in {LANG}. Wenn du Quellen nutzt, nenne die Domains in Klammern. Frage: {QUESTION}",
+      "fr": "Réponds de manière précise et concise en {LANG}. Si tu utilises des sources, indique les domaines entre parenthèses. Question : {QUESTION}",
+      "it": "Rispondi in modo preciso e conciso in {LANG}. Se usi fonti, cita i domini tra parentesi. Domanda: {QUESTION}",
+      "rm": "Respunda precis e concis en {LANG}. Sche ti dovras funtaunas, inditgescha ils dominis tranter parentesas. Dumonda: {QUESTION}",
+      "en": "Answer precisely and concisely in {LANG}. If you use sources, cite domains in parentheses. Question: {QUESTION}"
+    }
+  }
+}
