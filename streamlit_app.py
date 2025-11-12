@@ -11,6 +11,18 @@ from ki_rep_monitor import run_pipeline
 st.set_page_config(page_title='KI-Reputation Monitor', layout='wide')
 st.title('🔎 KI-Reputation Monitor — Final3')
 
+# --- Globaler Debug-Schalter (während Run gesperrt) ---
+if "debug_mode" not in st.session_state:
+    st.session_state.debug_mode = False
+if "show_raw" not in st.session_state:
+    st.session_state.show_raw = False
+
+is_running = bool(st.session_state.runner.get("thread") and st.session_state.runner["thread"].is_alive())
+
+st.checkbox("Debug-Modus (Events unten anzeigen)", key="debug_mode", disabled=is_running)
+if st.session_state.debug_mode:
+    st.checkbox("Raw API-Payloads (redigiert)", key="show_raw", disabled=is_running)
+
 # ---- Session-State ----
 if "runner" not in st.session_state:
     st.session_state.runner = {"thread": None, "cancel": None, "start": None, "run_id": 0}
@@ -118,8 +130,39 @@ if run_btn:
     # Quick-Preview
     try:
         qdf = pd.read_excel(q_path, sheet_name="Questions")
-        st.sidebar.write("Questions sheet columns:", list(qdf.columns))
-        st.sidebar.write("Preview:", qdf.head(3))
+        # Pre-Run-Zusammenfassung: Wie viele Fragen bleiben nach Filtern?
+        try:
+            qdf_norm = qdf.copy()
+            qdf_norm.columns = [str(c).strip() for c in qdf_norm.columns]
+            lower = {c.lower(): c for c in qdf_norm.columns}
+            # tolerantes Mapping wie im Backend
+            if "id" in lower:    qdf_norm = qdf_norm.rename(columns={ lower["id"]: "question_id" })
+            if "query" in lower: qdf_norm = qdf_norm.rename(columns={ lower["query"]: "question_text" })
+
+            qdf_norm["language"] = qdf_norm["language"].astype(str).str.strip().str.lower()
+            qdf_norm["category"] = qdf_norm["category"].astype(str).str.strip()
+
+            orig = len(qdf_norm)
+            langs = [str(l).strip().lower() for l in languages if str(l).strip()] if languages else None
+            cats  = {str(c).strip().upper() for c in categories if str(c).strip()} if categories else None
+
+            if langs:
+                qdf_norm = qdf_norm[qdf_norm["language"].isin(langs)].copy()
+            if cats:
+                qdf_norm = qdf_norm[qdf_norm["category"].str.upper().isin(cats)].copy()
+
+            if question_ids_raw:
+                ids = [int(x.strip()) for x in question_ids_raw.split(",") if x.strip().isdigit()]
+            if ids:
+                qdf_norm = qdf_norm[qdf_norm["question_id"].isin(ids)].copy()
+
+            st.sidebar.info(f"Fragen nach Filtern: {len(qdf_norm)} / {orig}")
+            st.sidebar.caption(f"Sprachen im Sheet: {sorted(list(set(qdf['language'].astype(str)) ))[:10]}")
+            st.sidebar.caption(f"Kategorien im Sheet: {sorted(list(set(qdf['category'].astype(str)) ))[:10]}")
+        except Exception as e:
+            st.sidebar.warning(f"Pre-Run-Filter-Vorschau nicht möglich: {e}")
+            st.sidebar.write("Questions sheet columns:", list(qdf.columns))
+            st.sidebar.write("Preview:", qdf.head(3))
     except Exception as e:
         st.sidebar.error(f"Kann 'Questions' nicht lesen: {e}")
         st.stop()
@@ -131,8 +174,8 @@ if run_btn:
     step_box = st.empty()
     health_box = st.empty()
     stall_warning_box = st.empty()
-    debug_mode = st.checkbox("Debug-Modus (Events unten anzeigen)", value=False)
-    show_raw = st.checkbox("Raw API-Payloads (redigiert)", value=False) if debug_mode else False
+    debug_mode = bool(st.session_state.debug_mode)
+    show_raw   = bool(st.session_state.show_raw) if debug_mode else False
     debug_expander = st.expander("🪵 Debug-Protokoll", expanded=False) if debug_mode else None
     debug_area = debug_expander.container() if debug_mode else None
 
