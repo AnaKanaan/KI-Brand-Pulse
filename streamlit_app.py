@@ -1,6 +1,8 @@
 import os, time, pandas as pd, streamlit as st
 from ki_rep_monitor import run_pipeline
 
+st.sidebar.write("Questions columns:", list(pd.read_excel(q_path, sheet_name="Questions").columns))
+
 st.set_page_config(page_title='KI-Reputation Monitor', layout='wide')
 st.title('🔎 KI-Reputation Monitor — Final3')
 
