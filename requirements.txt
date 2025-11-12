@@ -5,3 +5,4 @@ requests==2.32.3
 tldextract==5.1.2
 pytest==8.3.3
 flake8==7.1.1
+google-genai==0.3.0
