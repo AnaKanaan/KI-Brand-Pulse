@@ -301,10 +301,39 @@ def _canonize_questions_df(q: pd.DataFrame) -> pd.DataFrame:
     q["intent"]      = pd.to_numeric(q["intent"], errors="coerce").astype("Int64")
     q["variant"]     = pd.to_numeric(q["variant"], errors="coerce").astype("Int64")
     q = q.dropna(subset=["question_id", "question_text", "language"])
+    # Normalisieren (Case/Whitespace)
+    q["language"] = q["language"].astype(str).str.strip().str.lower()
+    q["category"] = q["category"].astype(str).str.strip()
     return q
 
 # --------------------------- Hauptpipeline ---------------------------
+orig_len = len(q)
 
+langs = None
+cats  = None
+
+if languages:
+    langs = [str(l).strip().lower() for l in languages if str(l).strip()]
+    q = q[q["language"].isin(langs)].copy()
+
+if categories:
+    cats = {str(c).strip().upper() for c in categories if str(c).strip()}
+    q = q[q["category"].astype(str).str.upper().isin(cats)].copy()
+
+if question_ids:
+    q = q[q["question_id"].isin(question_ids)].copy()
+
+_emit(
+    progress,
+    "filters_applied",
+    f"Nach Filtern: {len(q)} / {orig_len} Fragen",
+    languages=langs, categories=(sorted(list(cats)) if cats else None),
+    question_ids=question_ids
+)
+
+if q.empty:
+    raise ValueError("Keine Fragen nach Filter übrig.")
+    
 def run_pipeline(
     brand: str, topic: str, market: str, languages: list, profiles: list,
     question_xlsx: str, out_xlsx: str, domain_seed_csv: str, coder_prompts_json: str,
