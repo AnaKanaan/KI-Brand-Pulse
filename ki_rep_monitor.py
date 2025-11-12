@@ -2,7 +2,7 @@
 # End-to-end pipeline: Pass A (Antwort/Websuche) + Pass B (Normalisierung) + Enrichment + XLSX
 # - OpenAI Responses API (kein temperature/top_p bei GPT-5)
 # - Pass B erzwingt JSON-Ausgabe + reasoning={"effort":"medium"}
-# - Optional: Gemini-basiertes Overview für CSE-Treffer, falls GEMINI_API_KEY gesetzt ist
+# - Optional: Gemini-basierte Overview-Zusammenfassung für Google CSE-Treffer
 
 import os, json, time, math, re, uuid, pandas as pd, requests, tldextract
 from datetime import datetime, timezone
@@ -12,12 +12,14 @@ from threading import Event
 # --------------------------- Konfig / Modelle ---------------------------
 OPENAI_BASE = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
 
-# Exakte Vorgaben:
+# Vorgaben:
 MODEL_PASS_A = os.getenv("MODEL_PASS_A", "gpt-5-chat-latest")  # Chat/Antwort + Websuche
 MODEL_PASS_B = os.getenv("MODEL_PASS_B", "gpt-5")              # Normalisierung/Codierung (reasoning=medium)
 
-# GPT-5/Reasoning: diese Sampling-Parameter NICHT senden
+# Für diese Modellfamilien keine Sampling-Parameter senden
 UNSUPPORTED_BY_FAMILY = ("gpt-5", "o1", "o3", "o4")
+
+# --------------------------- Utils ---------------------------
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -27,8 +29,6 @@ def require_env_runtime(var: str) -> str:
     if not v:
         raise RuntimeError(f"{var} not set (use UI).")
     return v
-
-# --------------------------- Utilities ---------------------------
 
 def normalize_domain(d: str) -> str:
     if not d:
@@ -73,7 +73,7 @@ def _emit(progress: Optional[Callable[[Dict[str, Any]], None]], phase: str, msg:
     try:
         progress(ev)
     except Exception:
-        pass  # UI darf niemals die Pipeline brechen
+        pass  # UI-Fehler dürfen die Pipeline nicht killen
 
 # --------------------------- OpenAI Responses API ---------------------------
 
@@ -285,55 +285,36 @@ def render_cse_items_for_coder(items: List[Dict[str, Any]]) -> str:
 def _canonize_questions_df(q: pd.DataFrame) -> pd.DataFrame:
     q = q.copy()
     q.columns = [str(c).strip() for c in q.columns]
+
+    # tolerantes Mapping
     lower = {c.lower(): c for c in q.columns}
     cmap = {}
-    if "id" in lower:     cmap[lower["id"]] = "question_id"
-    if "query" in lower:  cmap[lower["query"]] = "question_text"
+    if "id" in lower:    cmap[lower["id"]] = "question_id"
+    if "query" in lower: cmap[lower["query"]] = "question_text"
     for want in ["language", "category", "intent", "variant"]:
         if want not in q.columns and want in lower:
             cmap[lower[want]] = want
     q = q.rename(columns=cmap)
+
     required = ["question_id", "question_text", "language", "category", "intent", "variant"]
     missing = [c for c in required if c not in q.columns]
     if missing:
         raise KeyError(f"Missing columns in 'Questions': {missing}. Present: {list(q.columns)}")
+
+    # Typen/Dropna
     q["question_id"] = pd.to_numeric(q["question_id"], errors="coerce").astype("Int64")
     q["intent"]      = pd.to_numeric(q["intent"], errors="coerce").astype("Int64")
     q["variant"]     = pd.to_numeric(q["variant"], errors="coerce").astype("Int64")
     q = q.dropna(subset=["question_id", "question_text", "language"])
-    # Normalisieren (Case/Whitespace)
+
+    # Normalisieren
     q["language"] = q["language"].astype(str).str.strip().str.lower()
     q["category"] = q["category"].astype(str).str.strip()
+
     return q
 
 # --------------------------- Hauptpipeline ---------------------------
-orig_len = len(q)
 
-langs = None
-cats  = None
-
-if languages:
-    langs = [str(l).strip().lower() for l in languages if str(l).strip()]
-    q = q[q["language"].isin(langs)].copy()
-
-if categories:
-    cats = {str(c).strip().upper() for c in categories if str(c).strip()}
-    q = q[q["category"].astype(str).str.upper().isin(cats)].copy()
-
-if question_ids:
-    q = q[q["question_id"].isin(question_ids)].copy()
-
-_emit(
-    progress,
-    "filters_applied",
-    f"Nach Filtern: {len(q)} / {orig_len} Fragen",
-    languages=langs, categories=(sorted(list(cats)) if cats else None),
-    question_ids=question_ids
-)
-
-if q.empty:
-    raise ValueError("Keine Fragen nach Filter übrig.")
-    
 def run_pipeline(
     brand: str, topic: str, market: str, languages: list, profiles: list,
     question_xlsx: str, out_xlsx: str, domain_seed_csv: str, coder_prompts_json: str,
@@ -350,9 +331,31 @@ def run_pipeline(
     q = _canonize_questions_df(q)
     _emit(progress, "questions_loaded", f"{len(q)} Zeilen geladen", columns=list(q.columns))
 
-    if languages:  q = q[q["language"].isin(languages)].copy()
-    if categories: q = q[q["category"].isin(categories)]
-    if question_ids: q = q[q["question_id"].isin(question_ids)]
+    # ---- Case-insensitive Filter (hier, NICHT auf Modulebene!) ----
+    orig_len = len(q)
+    langs = None
+    cats  = None
+
+    if languages:
+        langs = [str(l).strip().lower() for l in languages if str(l).strip()]
+        q = q[q["language"].isin(langs)].copy()
+
+    if categories:
+        cats = {str(c).strip().upper() for c in categories if str(c).strip()}
+        q = q[q["category"].astype(str).str.upper().isin(cats)].copy()
+
+    if question_ids:
+        q = q[q["question_id"].isin(question_ids)].copy()
+
+    _emit(
+        progress,
+        "filters_applied",
+        f"Nach Filtern: {len(q)} / {orig_len} Fragen",
+        languages=langs,
+        categories=(sorted(list(cats)) if cats else None),
+        question_ids=question_ids
+    )
+
     if q.empty:
         raise ValueError("Keine Fragen nach Filter übrig.")
 
@@ -360,7 +363,9 @@ def run_pipeline(
     system_coder = prompts["system_coder"]; user_by_lang = prompts["user_coder"]
     wrappers = _load_wrappers()
 
-    runs_rows = []; norm_rows = []; ev_rows = []
+    runs_rows: List[Dict[str, Any]] = []
+    norm_rows: List[Dict[str, Any]] = []
+    ev_rows:   List[Dict[str, Any]] = []
     cfg_rows = [{"key": "wrapper_mode", "value": wrapper_mode},
                 {"key": "profiles", "value": ",".join(profiles)}]
 
@@ -384,7 +389,8 @@ def run_pipeline(
                     break
 
                 run_id = f"{qid}-{profile}-{lang}-r{r+1}-{uuid.uuid4().hex[:8]}"
-                evidence_list = []; provider = "openai"; model_version = MODEL_PASS_A
+                evidence_list: List[Dict[str, Any]] = []
+                provider = "openai"; model_version = MODEL_PASS_A
 
                 try:
                     tmpl = (wrappers["wrappers"][wrapper_mode].get(lang) if wrappers else "{QUESTION}")
@@ -477,13 +483,13 @@ def run_pipeline(
                 runs_rows.append({"run_id": run_id, "question_id": qid, "category": row["category"],
                                   "profile": profile, "language": lang, "intent": intent, "variant": variant,
                                   "brand": brand, "topic": topic, "market": market,
-                                  "raw_text_len": len((obj.get('run_meta') or {}).get('error', '')),
+                                  "raw_text_len": len(str(obj.get('run_meta', {}).get('error', raw_text or ""))),
                                   "ts": now_iso(), "provider": provider, "model": model_version})
                 norm_rows.append({"run_id": run_id, **obj})
                 for e in obj["evidence"]:
                     ev_rows.append({"run_id": run_id, **e})
 
-                # Fortschritt
+                # Fortschritt / ETA
                 done += 1
                 elapsed = time.time() - start_t
                 per_item = elapsed / max(done, 1)
