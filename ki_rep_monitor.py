@@ -1,5 +1,5 @@
 # ki_rep_monitor.py
-import os, json, time, math, re, uuid, threading
+import os, json, time, math, re, uuid
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional, Callable
 
@@ -7,16 +7,16 @@ import pandas as pd
 import requests
 import tldextract
 
-# --------------------
-# Models / Endpoints
-# --------------------
-OPENAI_BASE = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
-MODEL_CHAT  = os.getenv("MODEL_CHAT", "gpt-5-chat-latest")   # Pass A
-MODEL_PASSB = os.getenv("MODEL_PASS_B", "gpt-5")             # Pass B (reasoning medium)
+# =========================================================
+# Modelle / Endpunkte
+# =========================================================
+OPENAI_BASE = os.getenv("OPENAI_API_URL", os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"))
+MODEL_CHAT  = os.getenv("MODEL_CHAT", "gpt-5-chat-latest")  # Pass A (Antwort)
+MODEL_PASSB = os.getenv("MODEL_PASS_B", "gpt-5")            # Pass B (Codierung)
 
-# --------------------
-# Small utils
-# --------------------
+# =========================================================
+# Utils
+# =========================================================
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -48,16 +48,16 @@ def freshness_bucket(age_days: Optional[int]) -> str:
     return ">365d"
 
 def freshness_index(evidence: List[Dict[str, Any]]) -> float:
-    vals = [math.exp(-float(e.get("age_days", 0))/90.0)
+    vals = [math.exp(-float(e.get("age_days", 0)) / 90.0)
             for e in evidence if isinstance(e.get("age_days"), (int, float))]
-    return sum(vals)/len(vals) if vals else 0.0
+    return sum(vals) / len(vals) if vals else 0.0
 
 def known_freshness_pct(evidence: List[Dict[str, Any]]) -> float:
-    return (sum(1 for e in evidence if e.get("age_days") is not None)/len(evidence)) if evidence else 0.0
+    return (sum(1 for e in evidence if e.get("age_days") is not None) / len(evidence)) if evidence else 0.0
 
-# --------------------
-# HTTP helpers
-# --------------------
+# =========================================================
+# HTTP / LLM
+# =========================================================
 def openai_responses(payload: Dict[str, Any]) -> Dict[str, Any]:
     key = require_env_runtime("OPENAI_API_KEY")
     r = requests.post(
@@ -66,43 +66,30 @@ def openai_responses(payload: Dict[str, Any]) -> Dict[str, Any]:
         data=json.dumps(payload),
         timeout=120
     )
-    # treat 2xx and 4xx/5xx consistently with error details
     if r.status_code >= 400:
         raise RuntimeError(f"OpenAI HTTP {r.status_code}: {r.text}")
     return r.json()
 
 def gemini_generate_text(prompt: str, system: Optional[str] = None, model: Optional[str] = None) -> str:
-    """
-    Optional: Verwende Gemini für die Overview-Zusammenfassung, falls GEMINI_API_KEY gesetzt.
-    """
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
         return ""
     mdl = model or os.getenv("GEMINI_MODEL", "gemini-1.5-pro-latest")
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{mdl}:generateContent?key={api_key}"
-
     parts = []
     if system:
-        parts.append({"text": f"[SYSTEM]\n{system}\n" })
+        parts.append({"text": f"[SYSTEM]\n{system}\n"})
     parts.append({"text": prompt})
-
-    payload = {
-        "contents": [{"parts": parts}],
-        "generationConfig": {"temperature": 0.2}
-    }
+    payload = {"contents": [{"parts": parts}], "generationConfig": {"temperature": 0.2}}
     r = requests.post(url, headers={"Content-Type": "application/json"}, data=json.dumps(payload), timeout=60)
     if r.status_code >= 400:
-        # Fallback: leere Antwort
         return ""
-    d = r.json()
     try:
+        d = r.json()
         return d["candidates"][0]["content"]["parts"][0]["text"]
     except Exception:
         return ""
 
-# --------------------
-# Responses API text/citations helpers
-# --------------------
 def extract_text_from_responses(data: Dict[str, Any]) -> str:
     if isinstance(data, dict) and data.get("output_text"):
         return data["output_text"]
@@ -113,10 +100,6 @@ def extract_text_from_responses(data: Dict[str, Any]) -> str:
         return json.dumps(data)
 
 def extract_text_and_citations(data: Dict[str, Any]):
-    """
-    Holt output_text + url_citation-Annos. Rückgabe: (text, citations[list])
-    citation: {url,title,domain,start,end,snippet}
-    """
     text = extract_text_from_responses(data) or ""
     citations = []
     try:
@@ -144,7 +127,6 @@ def extract_text_and_citations(data: Dict[str, Any]):
                             })
     except Exception:
         pass
-    # Dedup nach URL -> längstes snippet behalten
     dedup = {}
     for c in citations:
         u = c["url"]
@@ -158,9 +140,9 @@ def response_status(data: Dict[str, Any]) -> str:
     except Exception:
         return "unknown"
 
-# --------------------
-# Search & prompts
-# --------------------
+# =========================================================
+# Suche & Prompting
+# =========================================================
 def cse_list(q: str, lang: str, market: str, num: int = 5) -> List[Dict[str, Any]]:
     key = require_env_runtime("GOOGLE_API_KEY")
     cx  = require_env_runtime("GOOGLE_CSE_ID")
@@ -171,8 +153,7 @@ def cse_list(q: str, lang: str, market: str, num: int = 5) -> List[Dict[str, Any
     )
     if r.status_code >= 400:
         raise RuntimeError(f"CSE HTTP {r.status_code}: {r.text}")
-    d = r.json()
-    items = d.get("items") or []
+    items = (r.json().get("items") or [])
     out = []
     for it in items:
         out.append({
@@ -193,10 +174,7 @@ def overview_substitute_with_openai(query: str, cse_items: List[Dict[str, Any]],
     user = "\n".join(lines)
     data = openai_responses({
         "model": MODEL_CHAT,
-        "input": [
-            {"role": "system", "content": sys},
-            {"role": "user",   "content": user}
-        ],
+        "input": [{"role": "system", "content": sys}, {"role": "user", "content": user}],
         "temperature": float(temperature),
         "max_output_tokens": int(max_tokens)
     })
@@ -204,22 +182,16 @@ def overview_substitute_with_openai(query: str, cse_items: List[Dict[str, Any]],
 
 def overview_substitute(query: str, cse_items: List[Dict[str, Any]], lang: str,
                         temperature: float = 0.2, max_tokens: int = 900) -> str:
-    """
-    Falls GEMINI_API_KEY gesetzt ist, nutze Gemini; sonst OpenAI.
-    """
-    sys = f"Antworte in {lang}. Nutze ausschließlich die bereitgestellten Treffer. Zitiere Domains in Klammern, z. B. (nzz.ch)."
-    body = []
+    combined = []
     for i, it in enumerate(cse_items, 1):
         domain = it.get("displayLink") or normalize_domain(it.get("link", ""))
-        body.append(f"{i}) {it.get('title','')} — {it.get('link','')} — {domain} — {it.get('snippet','')}")
-    combined = f"{sys}\n\nFrage:\n{query}\n\nTreffer:\n" + "\n".join(body)
-
-    # Try Gemini if available
+        combined.append(f"{i}) {it.get('title','')} — {it.get('link','')} — {domain} — {it.get('snippet','')}")
+    sys = f"Antworte in {lang}. Nutze ausschließlich die bereitgestellten Treffer. Zitiere Domains in Klammern."
+    body = f"{sys}\n\nFrage:\n{query}\n\nTreffer:\n" + "\n".join(combined)
     if os.getenv("GEMINI_API_KEY"):
-        txt = gemini_generate_text(prompt=combined)
+        txt = gemini_generate_text(prompt=body)
         if txt:
             return txt
-    # Fallback: OpenAI
     return overview_substitute_with_openai(query, cse_items, lang, temperature, max_tokens)
 
 def render_cse_items_for_coder(items: List[Dict[str, Any]]) -> str:
@@ -235,19 +207,14 @@ def render_cse_items_for_coder(items: List[Dict[str, Any]]) -> str:
             lines.append(f"{i}) {title} — {url} — {domain}")
     return "\n".join(lines) if lines else "(keine)"
 
-# --------------------
-# JSON normalizer (Pass B)
-# --------------------
+# =========================================================
+# Pass B (JSON-Normalisierung)
+# =========================================================
 def load_coder_prompts(path: str) -> Dict[str, Any]:
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
 def pass_b_normalize(system_prompt: str, user_prompt: str, model: Optional[str] = None, max_tokens: int = 800) -> Dict[str, Any]:
-    """
-    Pass B: normalisiert in striktes JSON.
-    Responses API: JSON-Erzwingung via text.format
-    gpt-5: reasoning=medium
-    """
     m = model or MODEL_PASSB
     payload = {
         "model": m,
@@ -257,7 +224,7 @@ def pass_b_normalize(system_prompt: str, user_prompt: str, model: Optional[str] 
         ],
         "max_output_tokens": int(max_tokens),
         "reasoning": {"effort": "medium"},
-        "text": {"format": "json"}   # <- korrekt statt response_format
+        "text": {"format": "json"}
     }
     data = openai_responses(payload)
     txt = extract_text_from_responses(data).strip()
@@ -267,16 +234,15 @@ def pass_b_normalize(system_prompt: str, user_prompt: str, model: Optional[str] 
         txt2 = re.sub(r"^```json|```$", "", txt, flags=re.M).strip()
         return json.loads(txt2)
 
-# --------------------
-# Evidence enrichment
-# --------------------
+# =========================================================
+# Evidence Enrichment
+# =========================================================
 def enrich_evidence(evidence: List[Dict[str, Any]], domain_seed_csv: str) -> List[Dict[str, Any]]:
     seeds = pd.read_csv(domain_seed_csv).fillna("")
     direct = {}
     for _, row in seeds.iterrows():
         dt = row["domain_type"]
-        ex = str(row["example_domains"] or "")
-        for d in ex.split(";"):
+        for d in str(row.get("example_domains", "")).split(";"):
             d = d.strip()
             if d:
                 direct[normalize_domain(d)] = dt
@@ -284,8 +250,8 @@ def enrich_evidence(evidence: List[Dict[str, Any]], domain_seed_csv: str) -> Lis
     rules = []
     for _, row in seeds.iterrows():
         dt = row["domain_type"]
-        tlds = [t.strip() for t in str(row["tld_hints"] or "").split(";") if t.strip()]
-        kws  = [k.strip().lower() for k in str(row["keyword_hints"] or "").split(";") if k.strip()]
+        tlds = [t.strip() for t in str(row.get("tld_hints", "")).split(";") if t.strip()]
+        kws  = [k.strip().lower() for k in str(row.get("keyword_hints", "")).split(";") if k.strip()]
         rules.append((dt, tlds, kws))
 
     now = datetime.utcnow()
@@ -296,14 +262,12 @@ def enrich_evidence(evidence: List[Dict[str, Any]], domain_seed_csv: str) -> Lis
         if not dt:
             for dtc, tlds, kws in rules:
                 if any(domain.endswith(t) for t in tlds if t):
-                    dt = dtc
-                    break
+                    dt = dtc; break
             if not dt:
                 text = (e.get("title", "") + " " + e.get("snippet", "")).lower()
                 for dtc, tlds, kws in rules:
                     if any(k in text for k in kws if k):
-                        dt = dtc
-                        break
+                        dt = dtc; break
         if not dt:
             dt = "other"
 
@@ -329,17 +293,16 @@ def enrich_evidence(evidence: List[Dict[str, Any]], domain_seed_csv: str) -> Lis
         })
     return out
 
-# --------------------
-# Questions normalization
-# --------------------
+# =========================================================
+# Questions Canon
+# =========================================================
 def _canonize_questions_df(q: pd.DataFrame) -> pd.DataFrame:
     q = q.copy()
     q.columns = [str(c).strip() for c in q.columns]
     lower = {c.lower(): c for c in q.columns}
     cmap = {}
-    # tolerantes Mapping
-    if "id" in lower:           cmap[lower["id"]] = "question_id"
-    if "query" in lower:        cmap[lower["query"]] = "question_text"
+    if "id" in lower:     cmap[lower["id"]] = "question_id"
+    if "query" in lower:  cmap[lower["query"]] = "question_text"
     for want in ["language", "category", "intent", "variant"]:
         if want not in q.columns and want in lower:
             cmap[lower[want]] = want
@@ -356,36 +319,33 @@ def _canonize_questions_df(q: pd.DataFrame) -> pd.DataFrame:
     q = q.dropna(subset=["question_id", "question_text", "language"])
     return q
 
-# --------------------
-# Pass A call helpers
-# --------------------
-def call_chat_no_search(q: str, temperature: float = 0.5, max_tokens: int = 900):
+# =========================================================
+# Pass A Helper
+# =========================================================
+def call_chat_no_search(prompt: str, temperature: float = 0.5, max_tokens: int = 900):
     data = openai_responses({
         "model": MODEL_CHAT,
-        "input": [{"role": "user", "content": q}],
+        "input": [{"role": "user", "content": prompt}],
         "temperature": float(temperature),
         "max_output_tokens": int(max_tokens)
     })
-    st = response_status(data)
-    text = extract_text_from_responses(data)
-    return text, {"status": st, "raw": data}
+    return extract_text_from_responses(data), {"status": response_status(data), "raw": data}
 
-def call_chat_search_auto(q: str, temperature: float = 0.25, max_tokens: int = 1200):
+def call_chat_search_auto(prompt: str, temperature: float = 0.25, max_tokens: int = 1200):
     data = openai_responses({
         "model": MODEL_CHAT,
         "tools": [{"type": "web_search"}],
         "tool_choice": "auto",
-        "input": [{"role": "user", "content": q}],
+        "input": [{"role": "user", "content": prompt}],
         "temperature": float(temperature),
         "max_output_tokens": int(max_tokens)
     })
-    st = response_status(data)
     text, citations = extract_text_and_citations(data)
-    return text, {"status": st, "citations": citations, "raw": data}
+    return text, {"status": response_status(data), "citations": citations, "raw": data}
 
-# --------------------
-# Main pipeline
-# --------------------
+# =========================================================
+# Hauptpipeline
+# =========================================================
 def run_pipeline(
     brand: str, topic: str, market: str,
     languages: List[str], profiles: List[str],
@@ -397,7 +357,10 @@ def run_pipeline(
     temperature_chat_no: float = 0.5, temperature_chat_search: float = 0.25,
     max_tokens: int = 900, wrapper_mode: str = 'free_emulation',
     progress: Optional[Callable[[Dict[str, Any]], None]] = None,
-    cancel_event: Optional[threading.Event] = None
+    cancel_event: Optional["threading.Event"] = None,
+    debug_level: str = "verbose",
+    max_questions: int = 0,
+    passA_search_tokens: Optional[int] = None
 ) -> Dict[str, Any]:
 
     def emit(ev: Dict[str, Any]):
@@ -407,13 +370,17 @@ def run_pipeline(
             except Exception:
                 pass
 
+    def dbg(phase: str, msg: str, meta: Optional[Dict[str, Any]] = None):
+        if debug_level != "none":
+            emit({"t": time.time(), "phase": phase, "msg": msg, "meta": (meta or {})})
+
     if cancel_event and cancel_event.is_set():
-        emit({"t": time.time(), "phase":"cancelled", "msg":"Abgebrochen vor Start"})
+        dbg("cancelled", "Abgebrochen vor Start")
         return {"out": out_xlsx, "runs": 0, "norm": 0, "evi": 0}
 
-    emit({"t": time.time(), "phase": "start", "msg": "Lese Questions"})
+    dbg("start", "Lese Questions")
     q = pd.read_excel(question_xlsx, sheet_name="Questions")
-    emit({"t": time.time(), "phase": "questions_loaded", "msg": f"{len(q)} Zeilen geladen"})
+    dbg("questions_loaded", f"{len(q)} Zeilen geladen")
     q = _canonize_questions_df(q)
 
     orig_len = len(q)
@@ -423,9 +390,10 @@ def run_pipeline(
         q = q[q["category"].isin(categories)].copy()
     if question_ids:
         q = q[q["question_id"].isin(question_ids)].copy()
+    if max_questions and max_questions > 0:
+        q = q.head(int(max_questions)).copy()
 
-    emit({"t": time.time(), "phase": "filters_applied", "msg": f"Nach Filtern: {len(q)} / {orig_len} Fragen"})
-
+    dbg("filters_applied", f"Nach Filtern: {len(q)} / {orig_len} Fragen")
     if q.empty:
         raise ValueError("Keine Fragen nach Filter übrig.")
 
@@ -433,11 +401,8 @@ def run_pipeline(
     system_coder = prompts["system_coder"]
     user_by_lang = prompts["user_coder"]
 
-    runs_rows: List[Dict[str, Any]] = []
-    norm_rows: List[Dict[str, Any]] = []
-    ev_rows:   List[Dict[str, Any]] = []
-    raw_rows:  List[Dict[str, Any]] = []  # Originalantworten Pass A
-    cfg_rows   = [
+    runs_rows, norm_rows, ev_rows, raw_rows = [], [], [], []
+    cfg_rows = [
         {"key": "wrapper_mode", "value": wrapper_mode},
         {"key": "profiles", "value": ",".join(profiles)}
     ]
@@ -450,7 +415,7 @@ def run_pipeline(
 
     for _, row in q.iterrows():
         if check_cancel():
-            emit({"t": time.time(), "phase": "cancelled", "msg": "Abgebrochen"})
+            dbg("cancelled", "Abgebrochen")
             break
 
         qid    = int(row["question_id"])
@@ -467,7 +432,7 @@ def run_pipeline(
         for profile in profiles:
             for r in range(int(num_runs)):
                 if check_cancel():
-                    emit({"t": time.time(), "phase": "cancelled", "msg": "Abgebrochen"})
+                    dbg("cancelled", "Abgebrochen")
                     break
 
                 run_id = f"{qid}-{profile}-{lang}-r{r+1}-{uuid.uuid4().hex[:8]}"
@@ -475,17 +440,18 @@ def run_pipeline(
                 provider = "openai"
                 model_version = MODEL_CHAT
 
-                Q = base_q  # (Wrapper-Modi wären hier erweiterbar)
-                emit({"t": time.time(), "phase": "build_prompt", "msg": f"Frage {qid} / {profile} / r{r+1} Prompt: {Q}"[:300]})
+                Q = base_q
+                dbg("build_prompt", f"Frage {qid} / {profile} / r{r+1} Prompt: {Q}")
 
-                # ---- PASS A
+                # ---------- PASS A
                 try:
                     if profile == "CHATGPT_NO_SEARCH":
+                        dbg("api_call_1_request", "LLM (no search) Anfrage")
                         raw_text, meta_a = call_chat_no_search(Q, temperature=temperature_chat_no, max_tokens=max_tokens)
                     elif profile == "CHATGPT_SEARCH_AUTO":
-                        # höheres Token-Budget gegen truncation
-                        raw_text, meta_a = call_chat_search_auto(Q, temperature=temperature_chat_search, max_tokens=max(1200, int(max_tokens)))
-                        # Citations in Evidence übernehmen
+                        dbg("api_call_1_request", "LLM (search auto) Anfrage")
+                        mtoks = int(passA_search_tokens or max(max_tokens, 1200))
+                        raw_text, meta_a = call_chat_search_auto(Q, temperature=temperature_chat_search, max_tokens=mtoks)
                         for c in (meta_a.get("citations") or []):
                             evidence_list.append({
                                 "title": c.get("title"),
@@ -495,6 +461,7 @@ def run_pipeline(
                                 "discovered_at": now_iso()
                             })
                     elif profile == "GOOGLE_OVERVIEW":
+                        dbg("api_call_1_request", "Google CSE")
                         items = cse_list(base_q, lang, market, topn)
                         raw_text = overview_substitute(base_q, items, lang)
                         for it in items:
@@ -506,51 +473,40 @@ def run_pipeline(
                                 "discovered_at": now_iso()
                             })
                         meta_a = {"status": "completed"}
-                        provider = "google"
-                        model_version = "overview-substitute"
+                        provider = "google"; model_version = "overview-substitute"
                     else:
                         raw_text = f"[ERROR] Unknown profile {profile}"
                         meta_a = {"status": "error"}
 
-                    emit({"t": time.time(), "phase": "api_call_1_response",
-                          "msg": "Pass A Antwort",
-                          "meta": {"status": meta_a.get("status"),
-                                   "prompt_excerpt": Q[:200],
-                                   "answer_excerpt": (raw_text or "")[:300]}})
+                    ans_excerpt = (raw_text or "")[:1500]
+                    dbg("api_call_1_response",
+                        "Pass A Antwort" if meta_a.get("status") == "completed" else "Fehler in Pass A",
+                        meta={"status": meta_a.get("status"), "answer_excerpt": ans_excerpt})
                 except Exception as ex:
-                    # Pass A Fehler – wir protokollieren und gehen weiter (Pass B bekommt Fehlerobjekt)
                     raw_text = f"[ERROR Pass A: {ex}]"
                     meta_a = {"status": "error", "error": str(ex)}
+                    dbg("api_call_1_response", "Fehler in Pass A", meta={"error": str(ex)})
 
-                # Originalantwort persistent
                 raw_rows.append({
-                    "run_id": run_id,
-                    "question_id": qid,
-                    "profile": profile,
-                    "language": lang,
-                    "answer_text": raw_text,
-                    "status": meta_a.get("status", "unknown"),
-                    "ts": now_iso()
+                    "run_id": run_id, "question_id": qid, "profile": profile, "language": lang,
+                    "answer_text": raw_text, "status": meta_a.get("status", "unknown"), "ts": now_iso()
                 })
 
                 if check_cancel():
-                    emit({"t": time.time(), "phase": "cancelled", "msg": "Abgebrochen"})
+                    dbg("cancelled", "Abgebrochen")
                     break
 
-                # ---- PASS B (Normalisierung)
-                prompts = load_coder_prompts(coder_prompts_json)
-                system_coder = prompts["system_coder"]
-                user_by_lang = prompts["user_coder"]
-
+                # ---------- PASS B
                 cse_fmt = render_cse_items_for_coder(evidence_list)
-                user_prompt = (user_by_lang.get(lang) or user_by_lang.get("en") or "").replace("{RAW_TEXT}", raw_text).replace("{CSE_ITEMS}", cse_fmt)
+                user_prompt = (user_by_lang.get(lang) or user_by_lang.get("en") or "")
+                user_prompt = user_prompt.replace("{RAW_TEXT}", raw_text).replace("{CSE_ITEMS}", cse_fmt)
 
-                emit({"t": time.time(), "phase": "normalize_request", "msg": "Pass B Normalisierung"})
-
+                dbg("normalize_request", "Pass B Normalisierung")
                 try:
                     obj = pass_b_normalize(system_coder, user_prompt, model=MODEL_PASSB, max_tokens=800)
+                    dbg("normalize_response", "Pass B OK")
                 except Exception as ex:
-                    emit({"t": time.time(), "phase": "normalize_response", "msg": "Pass B Fehler", "meta": {"error": str(ex)}})
+                    dbg("normalize_response", "Pass B Fehler", meta={"error": str(ex)})
                     obj = {
                         "brand": brand, "topic": topic, "market": market,
                         "language": lang, "profile": profile, "intent": intent, "variant": variant,
@@ -561,20 +517,21 @@ def run_pipeline(
                         "confidence": "low"
                     }
 
-                # Enrichment
-                emit({"t": time.time(), "phase": "enrich_start", "msg": "Enrichment der Evidence"})
+                # ---------- Enrichment
+                dbg("enrich_start", "Enrichment der Evidence")
                 try:
                     obj["evidence"] = enrich_evidence(obj.get("evidence") or evidence_list, domain_seed_csv)
                     obj["freshness_index"] = freshness_index(obj["evidence"])
                     obj["freshness_known_pct"] = known_freshness_pct(obj["evidence"])
-                    emit({"t": time.time(), "phase": "enrich_done", "msg": "Enrichment fertig"})
+                    dbg("enrich_done", "Enrichment fertig")
                 except Exception as ex:
                     obj["evidence"] = obj.get("evidence") or []
                     obj["freshness_index"] = obj.get("freshness_index", 0.0)
                     obj["freshness_known_pct"] = obj.get("freshness_known_pct", 0.0)
                     obj.setdefault("run_meta", {})["enrichment_error"] = str(ex)
+                    dbg("enrich_done", "Enrichment Fehler ignoriert", meta={"error": str(ex)})
 
-                # Meta auffüllen
+                # ---------- Meta / Rows
                 obj["brand"] = brand; obj["topic"] = topic; obj["market"] = market
                 obj["language"] = lang; obj["profile"] = profile; obj["intent"] = intent; obj["variant"] = variant
                 obj.setdefault("run_meta", {}).update({
@@ -586,35 +543,24 @@ def run_pipeline(
                 })
 
                 runs_rows.append({
-                    "run_id": run_id,
-                    "question_id": qid,
-                    "category": row["category"],
-                    "profile": profile,
-                    "language": lang,
-                    "intent": intent,
-                    "variant": variant,
-                    "brand": brand,
-                    "topic": topic,
-                    "market": market,
-                    "raw_text_len": len(raw_text or ""),
-                    "ts": now_iso(),
-                    "provider": provider,
-                    "model": model_version
+                    "run_id": run_id, "question_id": qid, "category": row["category"],
+                    "profile": profile, "language": lang, "intent": intent, "variant": variant,
+                    "brand": brand, "topic": topic, "market": market,
+                    "raw_text_len": len(raw_text or ""), "ts": now_iso(),
+                    "provider": provider, "model": model_version
                 })
                 norm_rows.append({"run_id": run_id, **obj})
                 for e in obj["evidence"]:
                     ev_rows.append({"run_id": run_id, **e})
 
                 done_jobs += 1
-                emit({"t": time.time(), "phase": "progress", "msg": f"{done_jobs}/{total_jobs} erledigt",
-                      "meta": {"done": done_jobs, "total": total_jobs}})
-
-                time.sleep(0.15)  # kleine Entzerrung
+                dbg("progress", f"{done_jobs}/{total_jobs} erledigt", meta={"done": done_jobs, "total": total_jobs})
+                time.sleep(0.12)
 
             if check_cancel():
                 break
 
-    # Output Excel
+    # ---------- Export (pandas 3.0 keyword-only)
     df_runs = pd.DataFrame(runs_rows)
     df_norm = pd.json_normalize(norm_rows, max_level=2) if norm_rows else pd.DataFrame()
     df_evi  = pd.DataFrame(ev_rows)
@@ -622,10 +568,10 @@ def run_pipeline(
     df_raw  = pd.DataFrame(raw_rows)
 
     with pd.ExcelWriter(out_xlsx, engine="openpyxl") as xlw:
-        if not df_runs.empty: df_runs.to_excel(xlw, "Runs", index=False)
-        if not df_norm.empty: df_norm.to_excel(xlw, "Normalized", index=False)
-        if not df_evi.empty:  df_evi.to_excel(xlw, "Evidence", index=False)
-        if not df_cfg.empty:  df_cfg.to_excel(xlw, "Config", index=False)
-        if not df_raw.empty:  df_raw.to_excel(xlw, "RawAnswers", index=False)
+        if not df_runs.empty: df_runs.to_excel(excel_writer=xlw, sheet_name="Runs", index=False)
+        if not df_norm.empty: df_norm.to_excel(excel_writer=xlw, sheet_name="Normalized", index=False)
+        if not df_evi.empty:  df_evi.to_excel(excel_writer=xlw, sheet_name="Evidence", index=False)
+        if not df_cfg.empty:  df_cfg.to_excel(excel_writer=xlw, sheet_name="Config", index=False)
+        if not df_raw.empty:  df_raw.to_excel(excel_writer=xlw, sheet_name="RawAnswers", index=False)
 
     return {"out": out_xlsx, "runs": len(df_runs), "norm": len(df_norm), "evi": len(df_evi)}
