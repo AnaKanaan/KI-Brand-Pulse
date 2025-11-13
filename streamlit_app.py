@@ -49,11 +49,21 @@ with st.sidebar:
     comp2  = st.text_input('Competitor 2', 'AOK')
     comp3  = st.text_input('Competitor 3', '')
 
-    profiles = st.multiselect('Profiles',
-                              ['CHATGPT_NO_SEARCH', 'CHATGPT_SEARCH_AUTO', 'GOOGLE_OVERVIEW'],
-                              default=['CHATGPT_NO_SEARCH','CHATGPT_SEARCH_AUTO','GOOGLE_OVERVIEW'])
+    # Available interaction profiles.  Gemini profiles are newly added for free chat and search support.
+    profiles = st.multiselect(
+        'Profiles',
+        ['CHATGPT_NO_SEARCH', 'CHATGPT_SEARCH_AUTO', 'GOOGLE_OVERVIEW', 'GEMINI_NO_SEARCH', 'GEMINI_SEARCH_AUTO'],
+        default=['CHATGPT_NO_SEARCH', 'CHATGPT_SEARCH_AUTO', 'GOOGLE_OVERVIEW']
+    )
 
     languages = st.multiselect('Languages', ['de','fr','it','rm','en'], default=['de'])
+
+    # Stakeholder perspective selection.  If none selected a generic perspective is used.
+    stakeholders = st.multiselect(
+        'Stakeholders',
+        ['generic', 'Bewerber', 'Investor', 'Mitarbeitender', 'Endkonsument', 'Business-Kunde', 'Business-Partner', 'Provider', 'Politischer Entscheider'],
+        default=['generic']
+    )
 
     categories = st.multiselect('Categories',
                                 ['BRANDED','UNBRANDED','THOUGHT_LEADERSHIP','RISK','BENCHMARK'],
@@ -65,13 +75,18 @@ with st.sidebar:
     num_runs   = st.number_input('Replicates per question', 1, 10, 1)
     temp_no    = st.slider('Temp (Chat no search)', 0.0, 1.2, 0.5, 0.05)
     temp_auto  = st.slider('Temp (Chat auto-search)', 0.0, 1.2, 0.25, 0.05)
-    max_tokens = st.number_input('max_output_tokens (Pass A, no search)', 100, 4096, 900, 50)
-    max_tokens_search = st.number_input('max_output_tokens (Pass A, search)', 200, 8192, 1600, 50)
+    # Increase default token limits for Pass A to accommodate longer responses
+    max_tokens = st.number_input('max_output_tokens (Pass A, no search)', 100, 4096, 4000, 50)
+    max_tokens_search = st.number_input('max_output_tokens (Pass A, search)', 200, 8192, 4000, 50)
     wrapper_mode = st.selectbox('Pass-A Wrapper', ['free_emulation','stabilized'], index=0)
 
     st.markdown("### Model Settings")
-    model_chat   = st.text_input('Model (Pass A: Antwort)', os.getenv("MODEL_CHAT", "gpt-5-chat-latest"))
-    model_pass_b = st.text_input('Model (Pass B: Codierung)', os.getenv("MODEL_PASS_B", "gpt-5"))
+    # Default models now reflect the GPT‑5.1 series.  GPT‑5.1 Instant is
+    # exposed as gpt-5.1-chat-latest, while GPT‑5.1 Thinking is available as
+    # gpt-5.1【677344943524217†L566-L569】.  These defaults can be overridden by
+    # environment variables.
+    model_chat   = st.text_input('Model (Pass A: Antwort)', os.getenv("MODEL_CHAT", "gpt-5.1-chat-latest"))
+    model_pass_b = st.text_input('Model (Pass B: Codierung)', os.getenv("MODEL_PASS_B", "gpt-5.1"))
 
     if st.button('Apply Model Settings'):
         os.environ["MODEL_CHAT"]   = model_chat.strip()
@@ -197,7 +212,8 @@ def start_worker():
                 max_tokens=int(max_tokens), wrapper_mode=wrapper_mode,
                 progress=_progress, cancel_event=cancel_event,
                 debug_level=debug_level, max_questions=int(max_questions),
-                passA_search_tokens=int(max_tokens_search)
+                passA_search_tokens=int(max_tokens_search),
+                stakeholders=stakeholders
             )
             worker_event_sink({"t": time.time(), "phase": "done", "msg": json.dumps(res)})
         except Exception as ex:
