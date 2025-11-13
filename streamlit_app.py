@@ -1,5 +1,5 @@
 # streamlit_app.py
-import os, time, json, threading, queue
+import os, time, json, threading, queue, pathlib
 import pandas as pd
 import streamlit as st
 
@@ -8,28 +8,28 @@ from ki_rep_monitor import run_pipeline
 st.set_page_config(page_title='KI-Reputation Monitor', layout='wide')
 st.title('🔎 KI-Reputation Monitor — Final3')
 
-# -------------------------
-# Session Init
-# -------------------------
+# =========================================================
+# Session init (nur im UI-Thread)
+# =========================================================
 if "runner" not in st.session_state:
     st.session_state.runner = {
         "thread": None,
         "cancel": None,
-        "events": queue.Queue(),  # worker -> UI
-        "last_event_ts": 0.0,
+        "events": queue.Queue(),    # worker -> UI
         "jobs_done": 0,
         "jobs_total": 0,
-        "start_t": 0.0
+        "start_t": 0.0,
+        "log_path": None,           # NDJSON live-log
     }
 
-# -------------------------
+# =========================================================
 # API Keys (Session only)
-# -------------------------
+# =========================================================
 with st.expander('🔐 API-Keys (nur Session, keine Speicherung)'):
     openai_key = st.text_input('OpenAI API Key', type='password', placeholder='sk-...')
     google_key = st.text_input('Google API Key', type='password', placeholder='AIza...')
     google_cx  = st.text_input('Google CSE ID (cx)', type='password', placeholder='custom search engine id')
-    gemini_key = st.text_input('Gemini API Key', type='password', placeholder='AIza... (PaLM/Gemini key)')
+    gemini_key = st.text_input('Gemini API Key', type='password', placeholder='AIza...')
     if st.button('Apply Keys'):
         if openai_key: os.environ['OPENAI_API_KEY'] = openai_key
         if google_key: os.environ['GOOGLE_API_KEY'] = google_key
@@ -37,23 +37,23 @@ with st.expander('🔐 API-Keys (nur Session, keine Speicherung)'):
         if gemini_key: os.environ['GEMINI_API_KEY'] = gemini_key
         st.success('Keys gesetzt (nur Session).')
 
-# -------------------------
+# =========================================================
 # Sidebar Config
-# -------------------------
+# =========================================================
 with st.sidebar:
     st.markdown("### Konfiguration")
-    brand = st.text_input('Brand', 'DAK')
-    topic = st.text_input('Topic', 'KI im Gesundheitswesen')
+    brand  = st.text_input('Brand', 'DAK')
+    topic  = st.text_input('Topic', 'KI im Gesundheitswesen')
     market = st.text_input('Market', 'DE')
-    comp1 = st.text_input('Competitor 1', 'TK')
-    comp2 = st.text_input('Competitor 2', 'AOK')
-    comp3 = st.text_input('Competitor 3', '')
+    comp1  = st.text_input('Competitor 1', 'TK')
+    comp2  = st.text_input('Competitor 2', 'AOK')
+    comp3  = st.text_input('Competitor 3', '')
 
     profiles = st.multiselect('Profiles',
                               ['CHATGPT_NO_SEARCH', 'CHATGPT_SEARCH_AUTO', 'GOOGLE_OVERVIEW'],
-                              default=['CHATGPT_NO_SEARCH', 'CHATGPT_SEARCH_AUTO', 'GOOGLE_OVERVIEW'])
+                              default=['CHATGPT_NO_SEARCH','CHATGPT_SEARCH_AUTO','GOOGLE_OVERVIEW'])
 
-    languages = st.multiselect('Languages', ['de', 'fr', 'it', 'rm', 'en'], default=['de'])
+    languages = st.multiselect('Languages', ['de','fr','it','rm','en'], default=['de'])
 
     categories = st.multiselect('Categories',
                                 ['BRANDED','UNBRANDED','THOUGHT_LEADERSHIP','RISK','BENCHMARK'],
@@ -61,68 +61,67 @@ with st.sidebar:
 
     question_ids_raw = st.text_input('Question IDs (comma-separated)', '')
 
-    topn = st.number_input('Google CSE Top-N', 1, 10, 5)
-    num_runs = st.number_input('Replicates per question', 1, 10, 1)
-    temp_no = st.slider('Temp (Chat no search)', 0.0, 1.2, 0.5, 0.05)
-    temp_auto = st.slider('Temp (Chat auto-search)', 0.0, 1.2, 0.25, 0.05)
-    max_tokens = st.number_input('max_output_tokens (Pass A)', 100, 4096, 900, 50)
+    topn       = st.number_input('Google CSE Top-N', 1, 10, 5)
+    num_runs   = st.number_input('Replicates per question', 1, 10, 1)
+    temp_no    = st.slider('Temp (Chat no search)', 0.0, 1.2, 0.5, 0.05)
+    temp_auto  = st.slider('Temp (Chat auto-search)', 0.0, 1.2, 0.25, 0.05)
+    max_tokens = st.number_input('max_output_tokens (Pass A, no search)', 100, 4096, 900, 50)
+    max_tokens_search = st.number_input('max_output_tokens (Pass A, search)', 200, 8192, 1600, 50)
     wrapper_mode = st.selectbox('Pass-A Wrapper', ['free_emulation','stabilized'], index=0)
 
     st.markdown("### Model Settings")
-    model_chat = st.text_input('Model (Pass A: Antwort)', os.getenv("MODEL_CHAT", "gpt-5-chat-latest"))
-    model_passb = st.text_input('Model (Pass B: Codierung)', os.getenv("MODEL_PASS_B", "gpt-5"))
+    model_chat   = st.text_input('Model (Pass A: Antwort)', os.getenv("MODEL_CHAT", "gpt-5-chat-latest"))
+    model_pass_b = st.text_input('Model (Pass B: Codierung)', os.getenv("MODEL_PASS_B", "gpt-5"))
 
-    # Apply models into env (session)
     if st.button('Apply Model Settings'):
-        os.environ["MODEL_CHAT"] = model_chat.strip()
-        os.environ["MODEL_PASS_B"] = model_passb.strip()
+        os.environ["MODEL_CHAT"]   = model_chat.strip()
+        os.environ["MODEL_PASS_B"] = model_pass_b.strip()
         st.success("Modelle gesetzt.")
 
     uploaded = st.file_uploader('Question Library (xlsx, optional)', type=['xlsx'])
-    if uploaded is not None:
-        question_xlsx = uploaded
-    else:
-        question_xlsx = 'ki_question_library.xlsx'
+    question_xlsx = uploaded if uploaded is not None else 'ki_question_library.xlsx'
+
+    st.markdown("### Debug & Limits")
+    debug_level = st.selectbox("Debug-Detailgrad", ["verbose","basic","none"], index=0)
+    max_questions = st.number_input("Max. Fragen (Testlauf, 0 = alle)", 0, 2000, 0, 10)
 
     st.divider()
-    run_btn = st.button('🚀 Run')
+    run_btn  = st.button('🚀 Run')
     stop_btn = st.button('🛑 Stop')
+    clear_btn= st.button('🧹 Clear Logs')
 
-# -------------------------
-# Helpers
-# -------------------------
+# =========================================================
+# Helpers (UI-Thread)
+# =========================================================
 def parse_ids(s: str):
-    if not s or not s.strip():
-        return None
+    if not s or not s.strip(): return None
     out = []
     for p in s.split(','):
         p = p.strip()
-        if not p:
-            continue
-        try:
-            out.append(int(p))
-        except Exception:
-            pass
+        if not p: continue
+        try: out.append(int(p))
+        except: pass
     return out or None
 
-def event_sink(ev: dict):
-    """
-    Worker -> UI queue
-    """
+def ui_event_sink(ev: dict):
+    """Nur im UI-Thread st.session_state anfassen."""
     st.session_state.runner["events"].put(ev)
+    lp = st.session_state.runner.get("log_path")
+    if lp:
+        try:
+            with open(lp, "a", encoding="utf-8") as f:
+                f.write(json.dumps(ev, ensure_ascii=False) + "\n")
+        except Exception:
+            pass
 
 def eta_text(done: int, total: int, start_t: float) -> str:
-    if done <= 0:
-        return "–"
+    if done <= 0 or total <= 0: return "–"
     elapsed = max(0.001, time.time() - start_t)
-    rate = done / elapsed  # jobs per sec
-    remaining = max(0, total - done)
-    if rate <= 0:
-        return "–"
-    sec_left = int(remaining / rate)
-    mins = sec_left // 60
-    secs = sec_left % 60
-    return f"{mins:02d}:{secs:02d}"
+    rate = done / elapsed
+    if rate <= 0: return "–"
+    remain = total - done
+    sec_left = int(remain / rate)
+    return f"{sec_left // 60:02d}:{sec_left % 60:02d}"
 
 def save_uploaded_file_to_tmp(uploaded_file) -> str:
     if isinstance(uploaded_file, str):
@@ -132,29 +131,27 @@ def save_uploaded_file_to_tmp(uploaded_file) -> str:
         f.write(uploaded_file.getbuffer())
     return path
 
-# -------------------------
-# Runner lifecycle
-# -------------------------
+# =========================================================
+# Runner (Worker darf KEIN st.* benutzen)
+# =========================================================
 def start_worker():
     if not os.getenv('OPENAI_API_KEY'):
         st.error('Bitte zuerst OpenAI API Key setzen.')
         return
 
-    # ensure queue empty
+    # Queue leeren
     q: queue.Queue = st.session_state.runner["events"]
     while not q.empty():
         try: q.get_nowait()
-        except Exception: break
+        except: break
 
-    # persist uploaded file
     q_path = save_uploaded_file_to_tmp(question_xlsx)
-
-    # quick debug preview of Questions columns (safe)
+    # schnelle Spaltenvorschau
     try:
         cols = list(pd.read_excel(q_path, sheet_name="Questions").columns)
         st.sidebar.write("Questions sheet columns:", cols)
     except Exception as ex:
-        st.sidebar.write("Questions sheet columns: <Fehler beim Lesen>", str(ex))
+        st.sidebar.write("Questions sheet columns: <Fehler>", str(ex))
 
     out_name = f'out_{int(time.time())}.xlsx'
     cancel_event = threading.Event()
@@ -163,15 +160,27 @@ def start_worker():
     st.session_state.runner["jobs_done"] = 0
     st.session_state.runner["jobs_total"] = 0
 
+    log_path = f"/tmp/_run_{int(time.time())}.ndjson"
+    st.session_state.runner["log_path"] = log_path
+    try:
+        pathlib.Path(log_path).write_text("", encoding="utf-8")
+    except Exception:
+        st.session_state.runner["log_path"] = None
+        log_path = None
+
+    # Worker-lokale Sinks (keine session_state Zugriffe!)
+    def worker_event_sink(ev: dict):
+        try:
+            q.put(ev)
+            if log_path:
+                with open(log_path, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(ev, ensure_ascii=False) + "\n")
+        except Exception:
+            pass
+
     def _progress(ev: dict):
-        # Pick out progress
-        meta = ev.get("meta") or {}
-        if ev.get("phase") == "progress":
-            done = int(meta.get("done", 0))
-            total = int(meta.get("total", 0))
-            st.session_state.runner["jobs_done"] = done
-            st.session_state.runner["jobs_total"] = total
-        event_sink(ev)
+        # nur in Queue schieben, UI aktualisiert Counters beim Drain
+        worker_event_sink(ev)
 
     def _work():
         try:
@@ -184,23 +193,30 @@ def start_worker():
                 topn=int(topn), num_runs=int(num_runs),
                 categories=categories, question_ids=parse_ids(question_ids_raw),
                 comp1=comp1, comp2=comp2, comp3=comp3,
-                temperature_chat_no=float(temp_no),
-                temperature_chat_search=float(temp_auto),
+                temperature_chat_no=float(temp_no), temperature_chat_search=float(temp_auto),
                 max_tokens=int(max_tokens), wrapper_mode=wrapper_mode,
-                progress=_progress, cancel_event=cancel_event
+                progress=_progress, cancel_event=cancel_event,
+                debug_level=debug_level, max_questions=int(max_questions),
+                passA_search_tokens=int(max_tokens_search)
             )
-            event_sink({"t": time.time(), "phase": "done", "msg": json.dumps(res)})
+            worker_event_sink({"t": time.time(), "phase": "done", "msg": json.dumps(res)})
         except Exception as ex:
-            event_sink({"t": time.time(), "phase": "error", "msg": str(ex)})
+            worker_event_sink({"t": time.time(), "phase": "error", "msg": str(ex)})
 
     th = threading.Thread(target=_work, name="runner-thread", daemon=True)
     st.session_state.runner["thread"] = th
     th.start()
 
 def stop_worker():
-    cancel_event = st.session_state.runner.get("cancel")
-    if cancel_event:
-        cancel_event.set()
+    c = st.session_state.runner.get("cancel")
+    if c: c.set()
+
+def clear_logs():
+    q: queue.Queue = st.session_state.runner["events"]
+    while not q.empty():
+        try: q.get_nowait()
+        except: break
+    st.session_state.runner["log_path"] = None
 
 # Buttons
 if run_btn and (st.session_state.runner["thread"] is None or not st.session_state.runner["thread"].is_alive()):
@@ -209,79 +225,75 @@ if run_btn and (st.session_state.runner["thread"] is None or not st.session_stat
 if stop_btn:
     stop_worker()
 
-# -------------------------
-# Live Panel (progress + debug)
-# -------------------------
+if clear_btn:
+    clear_logs()
+
+# =========================================================
+# Live-Status & Logs
+# =========================================================
 is_running = bool(st.session_state.runner.get("thread") and st.session_state.runner["thread"].is_alive())
 jobs_done  = st.session_state.runner.get("jobs_done", 0)
 jobs_total = st.session_state.runner.get("jobs_total", 0)
 start_t    = st.session_state.runner.get("start_t", time.time())
+log_path   = st.session_state.runner.get("log_path")
 
 st.divider()
-c1, c2, c3 = st.columns(3)
-with c1:
-    st.markdown("**Status**")
-    st.write("Running..." if is_running else "Idle")
-with c2:
-    st.markdown("**Fortschritt**")
-    st.write(f"{jobs_done}/{jobs_total}" if jobs_total else "–")
-with c3:
-    st.markdown("**ETA**")
-    st.write(eta_text(jobs_done, jobs_total, start_t))
+c1, c2, c3, c4 = st.columns(4)
+with c1: st.markdown("**Status**");      st.write("Läuft…" if is_running else "Idle")
+with c2: st.markdown("**Fortschritt**"); st.write(f"{jobs_done}/{jobs_total}" if jobs_total else "–")
+with c3: st.markdown("**ETA**");         st.write(eta_text(jobs_done, jobs_total, start_t))
+with c4:
+    if log_path and os.path.exists(log_path):
+        st.download_button("📥 Debug-Logs (NDJSON)", data=open(log_path,"rb").read(), file_name=os.path.basename(log_path))
 
-progress_bar = st.progress(0.0)
-if jobs_total > 0:
-    progress_bar.progress(min(1.0, jobs_done / jobs_total))
-else:
-    progress_bar.progress(0.0)
+progress_bar = st.progress(min(1.0, jobs_done / jobs_total) if jobs_total else 0.0)
 
-# Debug/Event Stream
-st.markdown("### 🪵 Debug-Protokoll")
+st.markdown('### 🪵 Debug-Protokoll (live)')
 log_box = st.container()
 with log_box:
-    # drain queue (bounded loop to avoid blocking)
     drained = 0
-    while drained < 500 and not st.session_state.runner["events"].empty():
+    while drained < 1000 and not st.session_state.runner["events"].empty():
         ev = st.session_state.runner["events"].get()
         drained += 1
+
+        # Fortschritt im UI aktualisieren (hier ist Streamlit-Kontext vorhanden)
+        if ev.get("phase") == "progress":
+            meta = ev.get("meta") or {}
+            st.session_state.runner["jobs_done"]  = int(meta.get("done", 0))
+            st.session_state.runner["jobs_total"] = int(meta.get("total", 0))
+
         phase = ev.get("phase", "")
         msg   = ev.get("msg", "")
         meta  = ev.get("meta") or {}
         tstr  = time.strftime("%H:%M:%S", time.localtime(ev.get("t", time.time())))
         lines = [f"{tstr} {phase} — {msg}"]
-        # einige Zusatzinfos formatiert
-        if meta:
-            # kompakte Anzeige der Citations (falls vorhanden)
-            cits = meta.get("citations") or []
-            if cits:
-                lines.append("    Quellen:")
-                for j, c in enumerate(cits, 1):
-                    dom = c.get("domain", "")
-                    tit = (c.get("title") or dom or "").strip()
-                    sn  = (c.get("snippet") or "").strip()
-                    url = c.get("url", "")
-                    if sn:
-                        lines.append(f"      {j}. {tit} ({dom}) – {sn} – {url}")
-                    else:
-                        lines.append(f"      {j}. {tit} ({dom}) – {url}")
-            # Sonstiges Debug kompakt ausgeben
-            pe = meta.get("prompt_excerpt")
-            if pe: lines.append(f"    prompt: {pe}")
-            ae = meta.get("answer_excerpt")
-            if ae: lines.append(f"    answer: {ae}")
+
+        # Quellen hübsch anzeigen
+        cits = meta.get("citations") or []
+        if cits:
+            lines.append("    Quellen:")
+            for j, c in enumerate(cits, 1):
+                dom = c.get("domain", "")
+                tit = (c.get("title") or dom or "").strip()
+                sn  = (c.get("snippet") or "").strip()
+                url = c.get("url", "")
+                if sn:
+                    lines.append(f"      {j}. {tit} ({dom}) – {sn} – {url}")
+                else:
+                    lines.append(f"      {j}. {tit} ({dom}) – {url}")
+
+        pe = meta.get("prompt_excerpt"); ae = meta.get("answer_excerpt")
+        if pe: lines.append(f"    prompt: {pe}")
+        if ae: lines.append(f"    answer: {ae}")
+
         st.code("\n".join(lines))
 
-# -------------------------
-# If finished: load output, show KPIs
-# -------------------------
+# =========================================================
+# Ergebnis-Panel wenn fertig
+# =========================================================
 if not is_running:
-    # Versuche "out_*.xlsx" zu finden (der Worker hat den Dateinamen in 'done' geloggt)
-    # Einfachster Weg: die neueste out_*.xlsx in CWD laden, falls vorhanden
     out_file = None
     try:
-        # Worker hat "done" mit res{"out": "..."} geschickt – wir könnten das log lesen,
-        # aber hier simpler: suche letzte out_*.xlsx im Arbeitsverzeichnis
-        # (Streamlit Cloud: CWD ist Repo-Root)
         candidates = [f for f in os.listdir(".") if f.startswith("out_") and f.endswith(".xlsx")]
         if candidates:
             out_file = max(candidates, key=lambda p: os.path.getmtime(p))
@@ -306,24 +318,28 @@ if not is_running:
 
         st.subheader('📊 KPIs')
         col1, col2, col3, col4, col5, col6 = st.columns(6)
-        try:
-            inc = norm['inclusion'].fillna(False).astype(bool).mean()
-        except Exception:
-            inc = 0.0
-        try:
-            sent = norm['aspect_scores.sentiment'].astype(float).fillna(0).mean()
-        except Exception:
-            sent = 0.0
-        try:
-            fresh = norm.get('freshness_index', pd.Series([0]*len(norm))).astype(float).fillna(0).mean()
-        except Exception:
-            fresh = 0.0
+
+        # robust gegen pandas 3.0
+        def _bool_mean(series: pd.Series) -> float:
+            if series is None or series.empty: return 0.0
+            s = series.astype('boolean').fillna(False)
+            return float(s.mean())
+
+        def _num_mean(series: pd.Series) -> float:
+            if series is None or series.empty: return 0.0
+            return pd.to_numeric(series, errors='coerce').fillna(0).mean()
+
+        inc   = _bool_mean(norm.get('inclusion', pd.Series(dtype='boolean')))
+        sent  = _num_mean(norm.get('aspect_scores.sentiment', pd.Series(dtype='float')))
+        fresh = _num_mean(norm.get('freshness_index', pd.Series(dtype='float')))
+
         evid_by_run = (evid.groupby('run_id').size() if not evid.empty else pd.Series(dtype=int))
         ev_rate = (evid_by_run.gt(0).mean() if not evid_by_run.empty else 0.0)
-        dom_div = (evid['domain'].nunique() if not evid.empty and 'domain' in evid.columns else 0)
+        dom_div = int(evid['domain'].nunique()) if not evid.empty and 'domain' in evid.columns else 0
 
-        lbl_counts = norm.get('sentiment_label', pd.Series([])).value_counts() if not norm.empty else pd.Series([])
-        pos_share = (lbl_counts.get('positive',0) / max(lbl_counts.sum(),1)) if not lbl_counts.empty else 0.0
+        lbl_col = norm.get('sentiment_label', pd.Series(dtype='object'))
+        lbl_counts = lbl_col.value_counts() if not lbl_col.empty else pd.Series(dtype='int')
+        pos_share  = (float(lbl_counts.get('positive', 0)) / max(int(lbl_counts.sum()), 1)) if not lbl_counts.empty else 0.0
 
         col1.metric('Inclusion Rate', f'{inc*100:.1f}%')
         col2.metric('Sentiment Ø', f'{sent:+.2f}')
@@ -344,7 +360,8 @@ if not is_running:
         with c2:
             st.markdown('**Freshness Buckets**')
             if not evid.empty and 'freshness_bucket' in evid.columns:
-                fb = evid['freshness_bucket'].value_counts().reindex(['today','≤7d','≤30d','≤90d','≤365d','>365d','unknown']).fillna(0).reset_index()
+                order = ['today','≤7d','≤30d','≤90d','≤365d','>365d','unknown']
+                fb = evid['freshness_bucket'].value_counts().reindex(order).fillna(0).reset_index()
                 fb.columns = ['bucket','count']
                 st.bar_chart(fb.set_index('bucket'))
             else:
@@ -352,7 +369,8 @@ if not is_running:
 
         st.markdown('### Profile × Language — Inclusion Rate')
         try:
-            inc_pf = norm.assign(incl=norm['inclusion'].fillna(False).astype(bool)).groupby(['profile','language'])['incl'].mean().reset_index()
+            inc_pf = norm.assign(incl=norm['inclusion'].astype('boolean').fillna(False)) \
+                         .groupby(['profile','language'])['incl'].mean().reset_index()
             inc_pf['incl'] = (inc_pf['incl']*100).round(1)
             inc_pf = inc_pf.pivot(index='profile', columns='language', values='incl').fillna(0)
             st.bar_chart(inc_pf)
@@ -361,24 +379,20 @@ if not is_running:
 
         st.markdown('### Sentiment by Profile')
         try:
-            s_pf = norm.groupby('profile')['aspect_scores.sentiment'].mean().reset_index().set_index('profile')
+            s_pf = pd.to_numeric(norm['aspect_scores.sentiment'], errors='coerce') \
+                       .groupby(norm['profile']).mean().to_frame('sentiment')
             st.bar_chart(s_pf)
         except Exception:
             pass
 
-        st.subheader('Runs')
-        st.dataframe(runs, use_container_width=True, hide_index=True)
-        st.subheader('Evidence')
-        st.dataframe(evid, use_container_width=True, hide_index=True)
-        st.subheader('Normalized (flattened JSON)')
-        st.dataframe(norm, use_container_width=True, hide_index=True)
+        st.subheader('Runs'); st.dataframe(runs, use_container_width=True, hide_index=True)
+        st.subheader('Evidence'); st.dataframe(evid, use_container_width=True, hide_index=True)
+        st.subheader('Normalized (flattened JSON)'); st.dataframe(norm, use_container_width=True, hide_index=True)
         if not raw.empty:
-            st.subheader('Raw Answers (Pass A)')
-            st.dataframe(raw, use_container_width=True, hide_index=True)
-        st.subheader('Config')
-        if not cfg.empty:
-            st.table(cfg)
+            st.subheader('Raw Answers (Pass A)'); st.dataframe(raw, use_container_width=True, hide_index=True)
+        st.subheader('Config'); 
+        if not cfg.empty: st.table(cfg)
     else:
         st.info('Keys setzen (optional), konfigurieren und **Run** starten.')
 else:
-    st.info('Lauf aktiv — Logs & Fortschritt siehe oben. Zum Abbrechen: **Stop**.')
+    st.info('Lauf aktiv — Logs & Fortschritt siehe oben. Mit **Stop** kannst du den Run abbrechen.')
