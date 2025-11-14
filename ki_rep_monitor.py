@@ -137,9 +137,41 @@ def gemini_generate_text(prompt: str, system: Optional[str] = None, model: Optio
         raise RuntimeError(f"Gemini response parse error: {ex}")
 
 def extract_text_from_responses(data: Dict[str, Any]) -> str:
+    """Extract the main answer text from a Responses API payload.
+
+    The Responses API returns a list of ``output`` blocks which may contain
+    reasoning steps, tool calls and one or more ``message`` blocks.  Earlier
+    versions of this helper naively accessed ``output[0]`` which fails when
+    the first block is a reasoning or web_search_call block.  In that case the
+    function fell back to ``json.dumps(data)``, so callers received the entire
+    JSON object instead of the natural‑language answer text.
+
+    Die neue Implementierung durchsucht die ``output``‑Liste gezielt nach dem
+    ersten ``message``‑Block und holt daraus den ``output_text``‑Inhalt.  Nur
+    wenn nichts Passendes gefunden wird, fällt sie auf das alte Verhalten
+    zurück.
+    """
+
+    # Fast‑path: some Responses shortcuts may already expose a top‑level
+    # ``output_text`` field.
     if isinstance(data, dict) and data.get("output_text"):
         return data["output_text"]
+
     out = data.get("output") if isinstance(data, dict) else None
+
+    # Neue, robuste Variante: explizit den ``message``‑Block suchen
+    if isinstance(out, list):
+        for block in out:
+            if not isinstance(block, dict):
+                continue
+            if block.get("type") != "message":
+                continue
+            for part in (block.get("content") or []):
+                if isinstance(part, dict) and part.get("type") == "output_text" and "text" in part:
+                    return part["text"]
+
+    # Fallback auf die ursprüngliche Heuristik für ältere/abweichende
+    # Payload‑Formate.
     try:
         return out[0]["content"][0]["text"]
     except Exception:
@@ -894,10 +926,8 @@ def run_pipeline(
                         raw_text = f"[ERROR Pass A: {ex}]"
                         meta_a = {"status": "error", "error": str(ex)}
                         dbg("api_call_1_response", "Fehler in Pass A", meta={"error": str(ex)})
-                    # Persist the raw answer for every run so that the Excel output
-                    # can be inspected in detail. This allows you to see exactly
-                    # what the model answered in Pass A (ChatGPT/Gemini/Google Overview)
-                    # before any normalisation or enrichment takes place.
+
+                    # record raw answer row for all runs (success or error)
                     raw_rows.append({
                         "run_id": run_id,
                         "question_id": qid,
@@ -908,8 +938,6 @@ def run_pipeline(
                         "status": meta_a.get("status", "unknown"),
                         "ts": now_iso()
                     })
-
-
 
                     # handle cancellation after pass A
                     if check_cancel():
