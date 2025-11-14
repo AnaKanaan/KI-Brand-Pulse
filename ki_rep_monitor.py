@@ -894,17 +894,22 @@ def run_pipeline(
                         raw_text = f"[ERROR Pass A: {ex}]"
                         meta_a = {"status": "error", "error": str(ex)}
                         dbg("api_call_1_response", "Fehler in Pass A", meta={"error": str(ex)})
-                        # log raw answer row for failed runs
-                        raw_rows.append({
-                            "run_id": run_id,
-                            "question_id": qid,
-                            "profile": profile,
-                            "language": lang,
-                            "stakeholder": stake,
-                            "answer_text": raw_text,
-                            "status": meta_a.get("status", "unknown"),
-                            "ts": now_iso()
-                        })
+                    # Persist the raw answer for every run so that the Excel output
+                    # can be inspected in detail. This allows you to see exactly
+                    # what the model answered in Pass A (ChatGPT/Gemini/Google Overview)
+                    # before any normalisation or enrichment takes place.
+                    raw_rows.append({
+                        "run_id": run_id,
+                        "question_id": qid,
+                        "profile": profile,
+                        "language": lang,
+                        "stakeholder": stake,
+                        "answer_text": raw_text,
+                        "status": meta_a.get("status", "unknown"),
+                        "ts": now_iso()
+                    })
+
+
 
                     # handle cancellation after pass A
                     if check_cancel():
