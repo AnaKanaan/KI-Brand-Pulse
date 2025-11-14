@@ -320,10 +320,10 @@ def overview_substitute_with_openai(query: str, cse_items: List[Dict[str, Any]],
         domain = it.get("displayLink") or normalize_domain(it.get("link", ""))
         lines.append(f"{i}) {it.get('title','')} — {it.get('link','')} — {domain} — {it.get('snippet','')}")
     user = "\n".join(lines)
+    # Note: omit ``temperature`` for models that do not support it (e.g. web search).
     data = openai_responses({
         "model": MODEL_CHAT,
         "input": [{"role": "system", "content": sys}, {"role": "user", "content": user}],
-        "temperature": float(temperature),
         "max_output_tokens": int(max_tokens)
     })
     return extract_text_from_responses(data)
@@ -371,8 +371,11 @@ def pass_b_normalize(system_prompt: str, user_prompt: str, model: Optional[str] 
             {"role": "user",   "content": user_prompt}
         ],
         "max_output_tokens": int(max_tokens),
+        # The Responses API expects a nested ``format`` object for structured
+        # outputs.  Setting ``type`` to ``json_object`` forces the model to
+        # output a valid JSON object.
         "reasoning": {"effort": "medium"},
-        "text": {"format": "json"}
+        "text": {"format": {"type": "json_object"}}
     }
     data = openai_responses(payload)
     txt = extract_text_from_responses(data).strip()
@@ -555,11 +558,13 @@ def call_chat_search_auto(prompt: str,
     # configurations.  We default to 4 000 here to accommodate long answers
     # without repeatedly truncating responses.  Adjust via the function
     # parameter if needed.
+    # Build the request payload.  Note that the web search models do not
+    # currently accept the ``temperature`` parameter, so it is omitted here to
+    # prevent invalid_request errors.
     payload = {
         "model": MODEL_CHAT,
         "input": prompt,
         "tools": [tool_def],
-        "temperature": float(temperature),
         "max_output_tokens": int(max_tokens)
     }
     data = openai_responses(payload)
