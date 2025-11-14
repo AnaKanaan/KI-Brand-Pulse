@@ -811,7 +811,7 @@ def run_pipeline(
                         if profile == "CHATGPT_NO_SEARCH":
                             dbg("api_call_1_request", "LLM (no search) Anfrage")
                             raw_text, meta_a = call_chat_no_search(Q, temperature=temperature_chat_no, max_tokens=max_tokens)
-                    elif profile == "CHATGPT_SEARCH_AUTO":
+                        elif profile == "CHATGPT_SEARCH_AUTO":
                             dbg("api_call_1_request", "LLM (search auto) Anfrage")
                             # When performing auto‑search we use a larger token limit.
                             # If ``passA_search_tokens`` is provided we respect it,
