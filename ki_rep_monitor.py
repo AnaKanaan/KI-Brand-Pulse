@@ -136,30 +136,27 @@ def gemini_generate_text(prompt: str, system: Optional[str] = None, model: Optio
     except Exception as ex:
         raise RuntimeError(f"Gemini response parse error: {ex}")
 
+
 def extract_text_from_responses(data: Dict[str, Any]) -> str:
-    """Extract the main answer text from a Responses API payload.
-
-    The Responses API returns a list of ``output`` blocks which may contain
-    reasoning steps, tool calls and one or more ``message`` blocks.  Earlier
-    versions of this helper naively accessed ``output[0]`` which fails when
-    the first block is a reasoning or web_search_call block.  In that case the
-    function fell back to ``json.dumps(data)``, so callers received the entire
-    JSON object instead of the natural‑language answer text.
-
-    Die neue Implementierung durchsucht die ``output``‑Liste gezielt nach dem
-    ersten ``message``‑Block und holt daraus den ``output_text``‑Inhalt.  Nur
-    wenn nichts Passendes gefunden wird, fällt sie auf das alte Verhalten
-    zurück.
     """
+    Extract the main answer text from a Responses API payload.
 
-    # Fast‑path: some Responses shortcuts may already expose a top‑level
-    # ``output_text`` field.
+    The Responses API may return multiple blocks in ``output`` such as
+    ``reasoning``, ``web_search_call`` and finally a ``message`` block which
+    contains the actual answer as ``output_text``.  This helper searches for
+    the first ``message`` block and returns its text.  If nothing suitable is
+    found we fall back to the old heuristic and, as a last resort, return the
+    JSON-dumped payload to aid debugging.
+    """
     if isinstance(data, dict) and data.get("output_text"):
+        # Some helper wrappers or future formats may surface output_text
+        # directly at the top level.
         return data["output_text"]
 
     out = data.get("output") if isinstance(data, dict) else None
 
-    # Neue, robuste Variante: explizit den ``message``‑Block suchen
+    # Preferred path: walk the output blocks and locate the first message
+    # block with an ``output_text`` part.
     if isinstance(out, list):
         for block in out:
             if not isinstance(block, dict):
@@ -167,15 +164,24 @@ def extract_text_from_responses(data: Dict[str, Any]) -> str:
             if block.get("type") != "message":
                 continue
             for part in (block.get("content") or []):
-                if isinstance(part, dict) and part.get("type") == "output_text" and "text" in part:
+                if (
+                    isinstance(part, dict)
+                    and part.get("type") == "output_text"
+                    and "text" in part
+                ):
                     return part["text"]
 
-    # Fallback auf die ursprüngliche Heuristik für ältere/abweichende
-    # Payload‑Formate.
+    # Fallback to the previous array-based assumption for older or unusual
+    # payload shapes.
     try:
         return out[0]["content"][0]["text"]
     except Exception:
-        return json.dumps(data)
+        # Last-resort fallback: return the full JSON payload as a string so
+        # that it can be inspected in the debug logs / RawAnswers sheet.
+        try:
+            return json.dumps(data, ensure_ascii=False)
+        except Exception:
+            return str(data)
 
 def extract_text_and_citations(data: Dict[str, Any]):
     text = extract_text_from_responses(data) or ""
@@ -922,12 +928,24 @@ def run_pipeline(
                         dbg("api_call_1_response",
                             "Pass A Antwort" if meta_a.get("status") == "completed" else "Fehler in Pass A",
                             meta={"status": meta_a.get("status"), "answer_excerpt": ans_excerpt})
+                    
                     except Exception as ex:
                         raw_text = f"[ERROR Pass A: {ex}]"
                         meta_a = {"status": "error", "error": str(ex)}
                         dbg("api_call_1_response", "Fehler in Pass A", meta={"error": str(ex)})
 
                     # record raw answer row for all runs (success or error)
+                    raw_resp_json = None
+                    if isinstance(meta_a, dict):
+                        raw_obj = meta_a.get("raw")
+                        if isinstance(raw_obj, (dict, list)):
+                            try:
+                                raw_resp_json = json.dumps(raw_obj, ensure_ascii=False)
+                            except Exception:
+                                raw_resp_json = str(raw_obj)
+                        elif raw_obj is not None:
+                            raw_resp_json = str(raw_obj)
+
                     raw_rows.append({
                         "run_id": run_id,
                         "question_id": qid,
@@ -936,6 +954,7 @@ def run_pipeline(
                         "stakeholder": stake,
                         "answer_text": raw_text,
                         "status": meta_a.get("status", "unknown"),
+                        "response_raw": raw_resp_json,
                         "ts": now_iso()
                     })
 
