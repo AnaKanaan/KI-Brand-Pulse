@@ -400,7 +400,15 @@ def load_coder_prompts(path: str) -> Dict[str, Any]:
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
-def pass_b_normalize(system_prompt: str, user_prompt: str, model: Optional[str] = None, max_tokens: int = 800) -> Dict[str, Any]:
+def pass_b_normalize(system_prompt: str, user_prompt: str, model: Optional[str] = None, max_tokens: int = 5000) -> Dict[str, Any]:
+    """Run Pass‑B normalisation in JSON mode and attach the raw API response.
+
+    The model is invoked via the Responses API with ``text.format.type =
+    'json_object'`` so that it returns a single JSON object.  In addition to
+    parsing the JSON payload, this helper stores the complete raw API
+    response under ``run_meta.raw_pass_b`` so that it is available in the
+    Normalized sheet for later inspection.
+    """
     m = model or MODEL_PASSB
     payload = {
         "model": m,
@@ -413,52 +421,77 @@ def pass_b_normalize(system_prompt: str, user_prompt: str, model: Optional[str] 
         # outputs.  Setting ``type`` to ``json_object`` forces the model to
         # output a valid JSON object.
         "reasoning": {"effort": "medium"},
-        "text": {"format": {"type": "json_object"}}
+        "text": {"format": {"type": "json_object"}},
     }
     data = openai_responses(payload)
     txt = extract_text_from_responses(data).strip()
     try:
-        return json.loads(txt)
+        obj = json.loads(txt)
     except Exception:
-        txt2 = re.sub(r"^```json|```$", "", txt, flags=re.M).strip()
-        return json.loads(txt2)
+        # tolerate Markdown fenced JSON blocks
+        txt2 = re.sub(r"^```json|^```|```$", "", txt, flags=re.M).strip()
+        obj = json.loads(txt2)
+    # Attach the raw Pass‑B response for full transparency.
+    try:
+        run_meta = obj.setdefault("run_meta", {})
+        run_meta["raw_pass_b"] = data
+    except Exception:
+        # Never fail the pipeline because of debug metadata issues.
+        pass
+    return obj
 
 # =========================================================
 # Evidence Enrichment
 # =========================================================
 def enrich_evidence(evidence: List[Dict[str, Any]], domain_seed_csv: str) -> List[Dict[str, Any]]:
+    """Enrich evidence items with domain type, dates and freshness.
+
+    Pass‑B is expected to already classify each source into a domain type
+    (e.g. ``CORPORATE``, ``NEWS_MEDIA``).  If a model‑assigned
+    ``domain_type``/``domain_type_code`` is present it is used as‑is.
+    Otherwise a fallback classification based on ``domain_type_seed.csv`` is
+    applied.  Publication dates are taken from the evidence object when
+    present or, as a fallback, extracted from the URL.
+    """
     seeds = pd.read_csv(domain_seed_csv).fillna("")
-    direct = {}
+    direct: Dict[str, str] = {}
     for _, row in seeds.iterrows():
-        dt = row["domain_type"]
+        dt_seed = str(row["domain_type"]).strip()
         for d in str(row.get("example_domains", "")).split(";"):
             d = d.strip()
             if d:
-                direct[normalize_domain(d)] = dt
+                direct[normalize_domain(d)] = dt_seed
 
     rules = []
     for _, row in seeds.iterrows():
-        dt = row["domain_type"]
+        dt_seed = str(row["domain_type"]).strip()
         tlds = [t.strip() for t in str(row.get("tld_hints", "")).split(";") if t.strip()]
         kws  = [k.strip().lower() for k in str(row.get("keyword_hints", "")).split(";") if k.strip()]
-        rules.append((dt, tlds, kws))
+        if dt_seed:
+            rules.append((dt_seed, tlds, kws))
 
     now = datetime.utcnow()
-    out = []
+    out: List[Dict[str, Any]] = []
     for e in evidence:
         domain = normalize_domain(e.get("domain") or e.get("url") or "")
-        dt = direct.get(domain)
-        if not dt:
+        # 1) Prefer explicit domain type from the model (Pass‑B)
+        dt = (str(e.get("domain_type")) or str(e.get("domain_type_code")) or "").strip()
+        # 2) Fallback to seed mappings when the model did not decide
+        if not dt and domain:
+            dt = direct.get(domain, "")
+        if not dt and domain:
+            text_blob = (e.get("title", "") + " " + e.get("snippet", "")).lower()
             for dtc, tlds, kws in rules:
                 if any(domain.endswith(t) for t in tlds if t):
-                    dt = dtc; break
-            if not dt:
-                text = (e.get("title", "") + " " + e.get("snippet", "")).lower()
-                for dtc, tlds, kws in rules:
-                    if any(k in text for k in kws if k):
-                        dt = dtc; break
+                    dt = dtc
+                    break
+                if any(k in text_blob for k in kws if k):
+                    dt = dtc
+                    break
         if not dt:
-            dt = "other"
+            dt = "OTHER_UNKNOWN"
+        # Human readable label (optional)
+        dt_label = (str(e.get("domain_type_label")) or str(e.get("domain_type_readable")) or dt).strip() or dt
 
         pub = e.get("published_at")
         discovered = e.get("discovered_at") or now_iso()
@@ -481,12 +514,13 @@ def enrich_evidence(evidence: List[Dict[str, Any]], domain_seed_csv: str) -> Lis
             "url": e.get("url") or e.get("link"),
             "domain": domain,
             "domain_type": dt,
+            "domain_type_label": dt_label,
             "country": e.get("country") or "unknown",
             "published_at": pub_dt.isoformat() if pub_dt else None,
             "discovered_at": discovered,
             "age_days": age_days,
             "freshness_bucket": freshness_bucket(age_days),
-            "snippet": e.get("snippet", "")
+            "snippet": e.get("snippet", ""),
         })
     return out
 
@@ -971,7 +1005,7 @@ def run_pipeline(
 
                     dbg("normalize_request", "Pass B Normalisierung")
                     try:
-                        obj = pass_b_normalize(system_coder, user_prompt, model=MODEL_PASSB, max_tokens=800)
+                        obj = pass_b_normalize(system_coder, user_prompt, model=MODEL_PASSB, max_tokens=5000)
                         dbg("normalize_response", "Pass B OK")
                     except Exception as ex:
                         dbg("normalize_response", "Pass B Fehler", meta={"error": str(ex)})
