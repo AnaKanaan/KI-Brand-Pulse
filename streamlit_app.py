@@ -262,9 +262,11 @@ def start_worker():
         except Exception as ex:
             worker_event_sink({"t": time.time(), "phase": "error", "msg": str(ex)})
 
+    st.session_state.runner["status"] = "starting"
     th = threading.Thread(target=_work, name="runner-thread", daemon=True)
     st.session_state.runner["thread"] = th
     th.start()
+    st.session_state.runner["status"] = "running"
 
 def stop_worker():
     c = st.session_state.runner.get("cancel")
