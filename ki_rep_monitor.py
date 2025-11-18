@@ -1,5 +1,4 @@
 # ki_rep_monitor.py
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 import os, json, time, math, re, uuid
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional, Callable, Set
@@ -7,6 +6,7 @@ from typing import List, Dict, Any, Optional, Callable, Set
 import pandas as pd
 import requests
 import tldextract
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # =========================================================
 # Modelle / Endpunkte
