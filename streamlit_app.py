@@ -198,6 +198,7 @@ def start_worker():
         st.sidebar.write("Questions sheet columns: <Fehler>", str(ex))
 
     out_name = f'out_{int(time.time())}.xlsx'
+    st.session_state.runner['expected_xlsx'] = out_name
     cancel_event = threading.Event()
     st.session_state.runner["cancel"] = cancel_event
     st.session_state.runner["start_t"] = time.time()
@@ -278,14 +279,27 @@ if clear_btn:
 try:
     r = st.session_state.get('runner', {}) if isinstance(st.session_state.get('runner', {}), dict) else {}
     need_refresh = False
-    # 1) Thread alive?
     th = r.get('thread')
-    if th is not None:
+    if th is not None and hasattr(th, 'is_alive') and th.is_alive():
+        need_refresh = True
+    status = str(r.get('status','')).lower()
+    if status in ('starting','running','queued','active','working'):
+        need_refresh = True
+    try:
+        prog = float(r.get('progress', 0) or 0)
+        total = float(r.get('total', 0) or 0)
+        if total > 0 and prog < total:
+            need_refresh = True
+    except Exception:
+        pass
+    if need_refresh:
         try:
-            if hasattr(th, 'is_alive') and th.is_alive():
-                need_refresh = True
+            from streamlit_autorefresh import st_autorefresh
+            st_autorefresh(interval=1500, limit=100000, key='autoRefresh')
         except Exception:
-            pass
+            st.experimental_rerun()
+except Exception:
+    pass
     # 2) Status-based triggering
     status = str(r.get('status','')).lower()
     if status in ('starting','running','queued','active','working'):
@@ -377,9 +391,12 @@ with log_box:
 if not is_running:
     out_file = None
     try:
-        candidates = [f for f in os.listdir(".") if f.startswith("out_") and f.endswith(".xlsx")]
-        if candidates:
-            out_file = max(candidates, key=lambda p: os.path.getmtime(p))
+        if st.session_state.runner.get('expected_xlsx') and os.path.exists(st.session_state.runner['expected_xlsx']):
+            out_file = st.session_state.runner['expected_xlsx']
+        else:
+            candidates = [f for f in os.listdir('.') if f.startswith('out_') and f.endswith('.xlsx')]
+            if candidates:
+                out_file = max(candidates, key=lambda p: os.path.getmtime(p))
     except Exception:
         pass
 
