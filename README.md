@@ -1,224 +1,254 @@
-KI-Reputation Monitor – Streamlit (Final3)
+# KI‑Brand‑Pulse — Konsolidierter Stand (18.11.2025)
 
-Repliziert drei UX-Profile für eure KI-Reputationsmessung:
+> **Claims**
+>
+> **„Was erzählt die KI‑Landschaft aktuell über meine Marke / mein Thema – und auf welcher Wissensbasis?“**  
+> *„Wir messen, wie KI‑Assistenten deinen Ruf formen: welche Antworten Nutzer*innen bekommen, welche Quellen dahinterstehen und wie stabil diese Bilder sind.“*
 
-CHATGPT_NO_SEARCH – gpt-5-chat-latest ohne Tools (Responses API)
+Dieses Readme beschreibt den aktuellen, konsolidierten Stand der App nach allen Anpassungen der letzten Runden.
 
-CHATGPT_SEARCH_AUTO – gpt-5-chat-latest mit tools: [{type: "web_search"}] und tool_choice: "auto"
+---
 
-GOOGLE_OVERVIEW – Google Custom Search JSON API (Top-N) → LLM-Übersicht nur aus Treffern
-– Optional: Kurzfassung via Gemini (falls GEMINI_API_KEY gesetzt), sonst OpenAI
+## Inhalt
+- [Ziel & Überblick](#ziel--überblick)
+- [Kernfunktionen](#kernfunktionen)
+- [Profile (NO_SEARCH, SEARCH_AUTO, GOOGLE_OVERVIEW)](#profile-no_search-search_auto-google_overview)
+- [KPIs & Definitionen](#kpis--definitionen)
+- [Answer Quality (quality_flags) & Scores](#answer-quality-quality_flags--scores)
+- [Stabilitätsmetriken (Multi-Runs)](#stabilitätsmetriken-multi-runs)
+- [Evidence-Enrichment & Domain-Typisierung](#evidence-enrichment--domain-typisierung)
+- [Stakeholder‑Bibliothek & Prompt-Prefixing](#stakeholder-bibliothek--prompt-prefixing)
+- [Fragebibliothek (Excel) & Intents](#fragebibliothek-excel--intents)
+- [Konfiguration & Laufzeit](#konfiguration--laufzeit)
+- [Ausgaben / Exporte](#ausgaben--exporte)
+- [Changelog (Auszug)](#changelog-auszug)
+- [Grenzen & Hinweise](#grenzen--hinweise)
 
-Pass B (Normalisierung): Strukturierte Kodierung der Rohantworten in ein striktes JSON-Schema (mehrsprachig), inkl. deterministischem Enrichment (Domain-Typ, Freshness).
-Output als Excel: Runs, Normalized, Evidence, Config.
+---
 
-✨ Was ist neu (gegenüber deiner vorherigen Version)
+## Ziel & Überblick
 
-Modellwahl präzisiert
+**KI‑Brand‑Pulse** benchmarkt Antworten populärer LLM‑Assistenten zu einer Marke/einem Thema. Die App erfasst:
+- **Was** geantwortet wird (Narrative, Sentiment, Visibility, Inclusion),
+- **Worauf** sich die Antwort stützt (Quellen/Evidence, Domain‑Typen, Aktualität),
+- **Wie stabil** Antworten über **mehrere Runs** sind (Agreement/Overlap),
+- **Wie qualitativ** die Antworten sind (Answer‑Quality‑Flags + Score).
 
-Pass A: fix gpt-5-chat-latest für Chat-UX (kein Sampling).
+Das System beruht auf **zwei Pässen**:
+- **Pass A**: Antwort erzeugen (ohne/mit Suche — je nach Profil)
+- **Pass B**: **Sachlich codieren** (Visibility, Sentiment, Narrative, Risks, **Answer‑Quality**, …) gemäß strengen Prompts und Rückgabe‑Schema.
 
-Pass B: gpt-5 mit reasoning: {"effort":"medium"} und response_format: {"type":"json_object"}.
+---
 
-Parameter-Guard: Entfernt unzulässige Sampling-Parameter (temperature, top_p, logprobs, n) für GPT-5/Familie automatisch.
+## Kernfunktionen
 
-Optionale Gemini-Kurzfassung im Profil GOOGLE_OVERVIEW (falls GEMINI_API_KEY in der Session).
+- **Feste Modelle & Tokenlimits**: Modelle und Output‑Längen sind **im Code fix**; **keine** UI‑Einstellung.
+- **Kein Temperature/Top‑p**: Für GPT‑5/5.1 (Responses API) **entfernt**; **nicht** unterstützt.
+- **Gemini‑Wrapper**: 
+  - *No‑Search*: direkter Gemini‑Call.
+  - *Search‑Auto*: Gemini mit `google_search`‑Tool, inkl. extrahierter Zitate.
+- **Evidence‑Enrichment**: Normalisierung, Freshness, Domain‑Typisierung + **Original‑Objekt** (`original`). 
+- **Stakeholder‑Prefixing**: Sprachspezifische Präfixe über **Excel‑Bibliothek**.
+- **Intents**: Konsistente Intent‑Bedeutungen in **fünf Sprachen**.
+- **Multi‑Runs** + **Stabilität**: num_runs pro Frage/Profil; Metriken zu Konsistenz.
+- **UI‑Verbesserungen**: Claims + Legende, Wrapper‑Erklärung, Frage‑Preview, Auto‑Refresh (Progress), Tokens/Modelle **aus UI entfernt**.
 
-Transparenz & Kontrolle
+---
 
-Live-Fortschritt + ETA + Health/Watchdog (Stall-Erkennung).
+## Profile (NO_SEARCH, SEARCH_AUTO, GOOGLE_OVERVIEW)
 
-Abbrechen-Button (sauberer Cancel).
+- **NO_SEARCH** (`*_NO_SEARCH`)  
+  LLM antwortet ohne Websuche auf Basis von **Modellwissen**. `citations` bleiben i. d. R. **leer** (`[]`) bzw. verweisen nur auf modellinterne Wissenselemente.
+- **SEARCH_AUTO** (`*_SEARCH_AUTO`)  
+  Das LLM recherchiert (z. B. Google/Gemini‑Search), sammelt **Evidence** (Titel, URL, Domain, Datum/Snippet), fasst faktenbasiert zusammen.
+- **GOOGLE_OVERVIEW**  
+  Kompakter Überblick mit Quellenlisten („Top‑Treffer“) zur schnellen Orientierung.
 
-Debug-Panel mit Event-Timeline (redigierte Payloads/Antworten) + Download des Debug-Logs (JSON).
+> Das **NO‑Search‑Profil** spiegelt strukturell das **Search‑Profil**: gleiche Output‑Schema, aber **leere `citations`**, sofern keine Modell‑Quellen vorliegen.
 
-Keine st.*-Aufrufe im Worker-Thread → kein ScriptRunContext-Spam mehr.
+---
 
-Robuste Questions-Validierung: Tolerantes Spalten-Mapping (z. B. id→question_id, query→question_text) und klare Fehlermeldungen.
+## KPIs & Definitionen
 
-Neue Dateien & Struktur: prompts/pass_a_wrappers.json, aktualisierte coder_prompts_passB.json, domain_type_seed.csv, optional .streamlit/config.toml.
+**Alter (`age_days`)**  
+Tage seit `published_at` der Quelle bis „jetzt“.
 
-Requirements aktualisiert (Python 3.13-kompatibel), inkl. google-genai.
+**Freshness‑Bucket**  
+`today`, `≤7d`, `≤30d`, `≤90d`, `≤365d`, `>365d` (per Evidence).
 
-🧱 Projektstruktur
-.
-├─ streamlit_app.py
-├─ ki_rep_monitor.py
-├─ coder_prompts_passB.json
-├─ domain_type_seed.csv
-├─ ki_question_library.xlsx
-├─ prompts/
-│  └─ pass_a_wrappers.json
-├─ requirements.txt
-└─ .streamlit/
-   └─ config.toml         # optional, s. unten
+**Freshness‑Index**  
+\( \text{avg}( e^{-(\text{age\_days}/90)} ) \) über alle Evidenzen (Skala 0..1, **höher = aktueller**).
 
+**Sentiment‑Score**  
+Kontinuierlich in \([-1, +1]\).
 
-ki_question_library.xlsx – Sheet „Questions“ (Pflichtspalten):
+**Sentiment‑Label**  
+Schwellen: \(\le -0{,}2\) = **negativ**, \(\ge +0{,}2\) = **positiv**, sonst **neutral**.
 
-question_id (int)
+**Visibility (0..1)**  
+„**Wie prominent** steht die Marke im Antworttext im Fokus?“
 
-question_text (string; Platzhalter ok: <BRAND>, <TOPIC>, <MARKET>, <COMP1>, <COMP2>, <COMP3>)
+**Inclusion (Accepted/Rejected)**  
+Ob die Antwort thematisch **einzahlt** (Accepted) oder nicht (Rejected).
 
-language („de“, „en“, „fr“, „it“, „rm“)
+---
 
-category (frei, z. B. „BRANDED“, „RISK“, „BENCHMARK“…)
+## Answer Quality (quality_flags) & Scores
 
-intent (int)
+**Ziel**: Neben *was* gesagt wird, prüfen **Qualität** & **Korrektheit**.
 
-variant (int)
+**Enum `aspect_scores.quality_flags`** (max. 5, nur Codes, konservativ flaggen):
+- `HALLUCINATION_SUSPECTED` – Tatsachenbehauptung ohne Evidenz oder gegen Evidenz.
+- `CONFUSES_WITH_OTHER_BRAND` – Verwechslung mit Namesakes.
+- `OUTDATED_INFO` – Zeitkritisches veraltet **oder** Median `age_days` > 365 als „aktuell“.
+- `MISSING_KEY_ASPECTS` – Offensichtliche Kernaspekte fehlen (z. B. Preis/Regulierung/Sicherheit bei entsprechender Frage).
+- `UNSUPPORTED_SUPERLATIVES` – Superlative/Absolute ohne Evidenz.
+- `INCOHERENT_OR_OFF_TOPIC` – Widersprüchlich/off‑topic.
+- `SOURCE_BIAS_RISK` – Einseitige Quellenlage (z. B. >70 % Corporate/PR) ohne Gegencheck.
+- `DATA_MISMATCH` – Zahlen/Daten inkonsistent (intern vs. Evidenz).
+- `REGION_CONTEXT_MISMATCH` – Falscher Markt/Region/Zeitrahmen.
+- `OTHER_QUALITY_ISSUE` – nur bei klar gravierendem Sonderfall.
 
-📦 Requirements
+**Quality‑Score (0..1)** — pro Run:  
+Gewichtete Flags → **Risk** wird aufsummiert und auf max. **1.0** gekappt:  
+`quality_risk_index = min(1.0, Summe(Gewichte der eindeutigen Flags))`  
+`quality_score = 1 - quality_risk_index`
 
-requirements.txt
+**Default‑Gewichte** (konservativ):
+- HALLUCINATION_SUSPECTED **1.0**; CONFUSES_WITH_OTHER_BRAND **0.9**;  
+- OUTDATED_INFO **0.7**; INCOHERENT_OR_OFF_TOPIC **0.7**; DATA_MISMATCH **0.7**;  
+- MISSING_KEY_ASPECTS **0.6**; REGION_CONTEXT_MISMATCH **0.6**;  
+- UNSUPPORTED_SUPERLATIVES **0.5**; SOURCE_BIAS_RISK **0.5**;  
+- OTHER_QUALITY_ISSUE **0.3**.
 
-streamlit==1.39.0
-pandas==2.3.3
-openpyxl==3.1.5
-requests==2.32.3
-tldextract==5.1.2
-google-genai==0.3.0
+> Anpassungen der Gewichte sind möglich; Standard ist auf **Strenge/Verlässlichkeit** getrimmt.
 
+---
 
-Getestet mit Python 3.13 (entspricht deinen Cloud-Logs).
+## Stabilitätsmetriken (Multi-Runs)
 
-🔑 Schlüssel (nur Session)
+Bei **num_runs ≥ 2** je (Frage/Profil/Sprache/Stakeholder/Kategorie/Intent/Variante):
 
-Schlüssel werden nur in der Session gesetzt (UI-Expander „🔐 API-Keys“) – keine Speicherung auf Disk:
+- **Agreement‑Rate (Sentiment)**  
+  Anteil der Runs mit **gleichem** `sentiment_label` (negativ/neutral/positiv).
 
-OPENAI_API_KEY
+- **Narrative‑Overlap** (Jaccard, Ø paarweise)  
+  Jaccard‑Index über Sets aus `aspect_scores.narrative`.
 
-GOOGLE_API_KEY + GOOGLE_CSE_ID (für Google CSE)
+- **Risk‑Overlap** (Jaccard, Ø paarweise)  
+  Jaccard‑Index über Sets aus `aspect_scores.risk_flags`.
 
-GEMINI_API_KEY (optional; nur für Gemini-Kurzfassung in GOOGLE_OVERVIEW)
+- **Quality‑Overlap** (Jaccard, Ø paarweise)  
+  **Neu:** Jaccard‑Index über Sets aus `aspect_scores.quality_flags`  
+  (1.0 = sehr stabil; 0.0 = inkonsistent).
 
-Alternativ kannst du die ENV-Variablen auf deiner Plattform vordefinieren (dann ist die Eingabe im UI optional).
+- **Source‑Overlap** (Jaccard, Ø paarweise)  
+  Jaccard‑Index über **Domains** der Evidenz je Run.
 
-🚀 Lokal starten
-python -m venv .venv && source .venv/bin/activate      # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
+- **Durchschnittliche Quality‑Indizes**  
+  `avg_quality_risk_index`, `avg_quality_score` über die Runs.
 
-# Optional per ENV (ansonsten im UI setzen):
-# export OPENAI_API_KEY=sk-...
-# export GOOGLE_API_KEY=AIza...
-# export GOOGLE_CSE_ID=your_cx
-# export GEMINI_API_KEY=...
+---
 
+## Evidence‑Enrichment & Domain‑Typisierung
+
+Jede Evidence wird **normalisiert** und angereichert:
+- `domain` (Normalisierung), `domain_type` (aus **CSV‑Seeds**),  
+- `published_at`, `age_days`, `freshness_bucket`,  
+- `original` (komplettes Originalobjekt unverändert).
+
+**Konfigurationsdatei:** `domain_type_prompt.csv`  
+Spalten: `domain_type`, `tld_hints`, `keyword_hints`, `example_domains`  
+(vordefiniert für **CORPORATE, NEWS_MEDIA, TRADE_PROFESSIONAL, GOV_PUBLIC, NGO_ASSOCIATION, RESEARCH_EDUCATION, REVIEW_PLATFORM, SOCIAL_PLATFORM, BLOG_FORUM, OTHER_UNKNOWN**).
+
+---
+
+## Stakeholder‑Bibliothek & Prompt‑Prefixing
+
+Datei **`stakeholder_library.xlsx`**:
+- Sheet `map` (DE‑UI‑Label → `stakeholder_id`),
+- Sheets `de/en/fr/it/rm` mit `display`, `prefix_template` (z. B. DE: *„Ich bin ein {stakeholder}.“*).
+
+**Sonderfall (UI‑Label):** „**Entscheidungsträger aus Politik und Verwaltung**“ ersetzt „Politischer Entscheider“.  
+**Logik:** Falls in der Frage kein `<STAKEHOLDER>` steht und Stakeholder ≠ generic → **Prefix** aus `prefix_template` wird der Frage **vorangestellt**.
+
+---
+
+## Fragebibliothek (Excel) & Intents
+
+**`ki_question_library.xlsx`**
+- **Sprach‑Sheets:** `de/en/fr/it/rm`  
+  + Spalte **`intent_desc`** (aus Intents‑Tabelle; 1–6).  
+- **`Intents`‑Sheet:** Beschreibung der **Intent‑Zahlen** 1–6 in fünf Sprachen.
+
+Beispiel‑Intents:  
+1 Überblick · 2 Leistung/Nutzen · 3 Risiken/Kritik · 4 Anwendung/How‑to · 5 Wettbewerb/Markt · 6 Strategie/Ausblick
+
+---
+
+## Konfiguration & Laufzeit
+
+### Voraussetzungen
+- **Python 3.10+**
+- `pip install -r requirements.txt`
+
+### Umgebungsvariablen
+- `OPENAI_API_KEY` — für OpenAI **Responses API** (GPT‑5/5.1 etc.)
+- `GEMINI_API_KEY` — für Google **Generative Language API** (Gemini)
+- **Wichtig für GPT‑5/5.1 (Responses API):**  
+  **Keine** klassischen Sampling‑Parameter (kein `temperature`, `top_p`, etc.). **Modelle & Limits sind fix** im Code.
+
+### Start
+```bash
 streamlit run streamlit_app.py
+```
 
-☁️ Streamlit Community Cloud
+### Retries
+- **Leichtgewichtige Retries (max 3)** für Pass‑A/B‑API‑Calls bei 429/5xx (Backoff).
 
-Repo pushen.
+---
 
-New app → Hauptdatei: streamlit_app.py.
+## Ausgaben / Exporte
 
-App öffnen → im UI-Expander 🔐 API-Keys setzen (pro Session).
-(Optional: Environment Variables in den App-Settings hinterlegen, dann entfällt die manuelle Eingabe.)
+**Excel‑Export** enthält u. a.:
+- **Runs** — alle Einzelruns
+- **Normalized** — normalisierte Pass‑B‑Objekte inkl.  
+  `aspect_scores.quality_flags`, `quality_risk_index`, `quality_score`
+- **Evidence** — angereicherte Quellen (inkl. `original`)
+- **Stability_Metrics** —  
+  `num_runs`, `agreement_rate_sentiment`,  
+  `jaccard_narrative_avg`, `jaccard_risk_flags_avg`,  
+  `jaccard_quality_flags_avg`, `jaccard_sources_avg`,  
+  `avg_quality_risk_index`, `avg_quality_score`, `top_sentiment_label`
+- **RawAnswers** — Rohtexte + Meta
+- **Config** — Laufkonfiguration
 
-UI konfigurieren → Run.
+---
 
-🖱️ Bedienung & Optionen
+## Changelog (Auszug)
 
-Profiles: CHATGPT_NO_SEARCH, CHATGPT_SEARCH_AUTO, GOOGLE_OVERVIEW (mehrfach wählbar).
+**2025‑11‑18 — Konsolidierter Build**
+- Tokens/Modelle **aus UI entfernt**; feste Limits.
+- **Legende** (KPIs, Profile), Claims im Header.
+- **Wrapper‑Erklärung** (free_emulation vs. stabilized) in Sidebar.
+- **Fragen‑Preview** (bis 5 Zeilen), **Auto‑Refresh** für Progress.
+- **Stakeholder‑Bibliothek** & Prefixing (inkl. Umbenennung).
+- **Intents**‑Tabelle & `intent_desc` in allen Sprachen.
+- **Evidence‑Enrichment** (inkl. `original`), Domain‑Typisierung & Freshness.
+- **Gemini‑Wrapper**: No‑Search & Search‑Auto (inkl. Zitate).
+- **Pass‑B‑Prompt**: klare Definition **Visibility/Sentiment**, knappe **Narrative/Risks**, **Answer‑Quality** mit Enum/Kriterien.
+- **Stabilität**: Sentiment‑Agreement, Narrative/Risk/Quality‑Jaccard, Source‑Jaccard, Quality‑Score (Run‑Level & Gruppe).
+- **NO‑Search** spiegelt **Search** Schema (leere `citations` möglich).
 
-Model Settings (Sidebar):
+---
 
-Pass A (Antwort): Default gpt-5-chat-latest (überschreibbar).
+## Grenzen & Hinweise
 
-Pass B (Codierung): Default gpt-5 (überschreibbar) – reasoning=medium ist fest im Code hinterlegt.
+- **Antwortqualität** hängt von externen Modellen ab; Flags und Scores sind **Heuristiken** (konservativ gewählt).
+- **Domain‑Typisierung** per CSV‑Seeds ist **best‑effort**; feingranulare Regeln können ergänzt werden.
+- **Kein Temperature/Top‑p** bei GPT‑5/5.1 (Responses API) – Designentscheidung & API‑Vorgabe.
+- **Fair Use** der Search‑APIs beachten (Kontingente, Latenzen).
 
-Gemini für Overview: Checkbox aktivieren (nur wirksam, wenn GEMINI_API_KEY gesetzt).
+---
 
-Wrappers: free_emulation (roh) oder stabilized (leichter Rahmen).
-
-Laufsteuerung: Fortschrittsbalken, ETA, Health-Anzeige, ⛔ Abbrechen.
-
-Debug: Debug-Modus + Anzeige roher (redigierter) Requests/Responses, Download des Event-Logs (JSON).
-
-🧠 Architektur (Kurz)
-
-Pass A: gpt-5-chat-latest; für Auto-Suche: tools: [{type:"web_search"}], tool_choice:"auto".
-
-GOOGLE_OVERVIEW: Google CSE (Top-N) → Kurzfassung via Gemini (wenn Key) sonst via OpenAI.
-
-Pass B: gpt-5 mit reasoning={"effort":"medium"} + response_format={"type":"json_object"}.
-
-Parameter-Guard: Sampling-Parameter werden bei GPT-5-Familien automatisch entfernt.
-
-Threading: Worker erzeugt Events → UI rendert (keine st.* im Worker).
-
-📤 Output
-
-Excel mit 4 Sheets:
-
-Runs – Metadaten je Run (Profil, Sprache, Zeit, Provider/Modell)
-
-Normalized – flach normalisierte JSON-Antworten aus Pass B (inkl. Scores/Labels)
-
-Evidence – Quellen inkl. Domain-Typ, Freshness-Bucket
-
-Config – Laufkonfiguration (Wrapper-Mode, Profile)
-
-🧪 Verifikation
-
-Im Debug-Panel siehst du pro Call:
-
-Pass A: api_call_1_request → model=gpt-5-chat-latest
-
-Pass B: normalize_request → model=gpt-5, reasoning="medium"
-
-Latenzen, redigierte Payloads/Antworten, Fortschritt/ETA
-
-Debug-Log als JSON herunterladen → Audit/Fehlersuche offline.
-
-🛠️ Troubleshooting
-
-KeyError: 'question_id'
-→ Im Sheet „Questions“ fehlen Pflichtspalten oder sind falsch benannt. Erlaubtes Mapping: id→question_id, query→question_text.
-→ Prüfe außerdem, dass language, category, intent, variant vorhanden sind.
-
-OpenAI 4xx/5xx
-→ Key fehlt/falsch, Rate-Limit oder Payload ungültig. Sieh ins Debug-Panel (Event api_call_1_response / Fehlermeldung).
-
-Google CSE 403/429
-→ Quota/Abrechnung prüfen, GOOGLE_API_KEY + GOOGLE_CSE_ID korrekt? topn ggf. reduzieren.
-
-Gemini-Fehler/keine Antwort
-→ GEMINI_API_KEY nicht gesetzt oder Modell nicht erreichbar. Fallback (OpenAI-Kurzfassung) greift automatisch.
-
-App „hängt“
-→ Health-Anzeige zeigt „letzte Event-Aktualisierung …s“. Bei Stillstand ⛔ Abbrechen und Debug-Log herunterladen.
-
-ScriptRunContext-Warnings
-→ Sollten verschwunden sein (keine st.* im Worker). Falls sie auftauchen: Stelle sicher, dass du keine Streamlit-Calls in eigenen Threads machst.
-
-🔒 Sicherheit & Datenschutz
-
-Keys werden nur in der Session gesetzt (UI), nicht gespeichert.
-
-Debug-Ausgaben redigieren automatisch Geheimnisse (Tokens).
-
-Evidence/Antworten werden nur lokal in der erzeugten Excel gespeichert.
-
-🗂️ Optional: .streamlit/config.toml
-[server]
-headless = true
-runOnSave = true
-
-[client]
-showSidebarNavigation = true
-
-[logger]
-level = "info"
-
-⬇️ Beispiel-CSV für domain_type_seed.csv
-domain_type,example_domains,tld_hints,keyword_hints
-news,nzz.ch;zeit.de,.ch;.de,zeitung;news;bericht
-company,siemens.com;nestle.com,.com,investor relations;press release;pressemitteilung
-social,twitter.com;linkedin.com,.com,tweet;linkedin;post
-blog,medium.com;substack.com,.com,blog;newsletter;meinung
-gov,admin.ch;.gv.at;.gov,.ch;.at;.gov,amtlich;behörde;verordnung;gesetz
-other,,,
-
-
-Stand: automatisch generiert nach Integration der Final3-Änderungen (Fortschritt/ETA/Abbruch, Debug-Events, Gemini-Option, Pass-B-Reasoning, Param-Guard, Dateien & Requirements).
+Bei Fragen oder Änderungswünschen (z. B. Gewichte, Schwellen, weitere Domaintypen) bitte ein Issue eröffnen oder die Config‑Dateien anpassen.
