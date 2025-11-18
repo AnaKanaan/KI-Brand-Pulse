@@ -1,4 +1,5 @@
 # ki_rep_monitor.py
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 import os, json, time, math, re, uuid
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional, Callable, Set
@@ -782,7 +783,9 @@ def load_stakeholder_lib(path: str) -> Dict[str, Any]:
         dbg("stakeholder_lib_error", str(ex))
     return lib
 
-def build_stakeholder_prompt(base_q: str, stake_ui_label: str, lang: str, lib_path: str) -> str:
+def build_stakeholder_prompt(base_q: str, stake_ui_label: str, lang: str, lib_path: str = None) -> str:
+    if not lib_path:
+        lib_path = os.path.join(BASE_DIR, 'stakeholder_library.xlsx')
     lib = load_stakeholder_lib(lib_path)
     sid = lib["map"].get(stake_ui_label, "generic")
     loc = lib["langs"].get(lang, {}).get(sid, {"display":"", "prefix_template":""})
@@ -920,7 +923,7 @@ def run_pipeline(
                     model_version = MODEL_CHAT
 
                     # incorporate stakeholder via library mapping
-                    Q = build_stakeholder_prompt(base_q, stake, lang, lib_path=os.path.join(base_dir, "stakeholder_library.xlsx"))
+                    Q = build_stakeholder_prompt(base_q, stake, lang, lib_path=os.path.join(BASE_DIR, "stakeholder_library.xlsx"))
 
                     dbg("build_prompt", f"Frage {qid} / {profile} / r{r+1} Prompt: {Q}")
 

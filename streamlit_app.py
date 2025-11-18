@@ -104,8 +104,9 @@ with st.sidebar:
 
     topn       = st.number_input('Google CSE Top-N', 1, 10, 5)
     num_runs   = st.number_input('Replicates per question', 1, 10, 1)
-    temp_no    = st.slider('Temp (Chat no search)', 0.0, 1.2, 0.5, 0.05)
-    temp_auto  = st.slider('Temp (Chat auto-search)', 0.0, 1.2, 0.25, 0.05)
+    # Temperature controls removed from UI; fixed per policy
+    temp_no = 0.0
+    temp_auto = 0.0
     # Increase default token limits for Pass A to accommodate longer responses
     max_tokens = 4000
     max_tokens_search = 4000
@@ -275,16 +276,39 @@ if clear_btn:
 # =========================================================
 # Live-Status & Logs
 try:
-    if st.session_state.runner.get('thread') and st.session_state.runner['thread'].is_alive():
+    r = st.session_state.get('runner', {}) if isinstance(st.session_state.get('runner', {}), dict) else {}
+    need_refresh = False
+    # 1) Thread alive?
+    th = r.get('thread')
+    if th is not None:
+        try:
+            if hasattr(th, 'is_alive') and th.is_alive():
+                need_refresh = True
+        except Exception:
+            pass
+    # 2) Status-based triggering
+    status = str(r.get('status','')).lower()
+    if status in ('starting','running','queued','active','working'):
+        need_refresh = True
+    # 3) Progress-based triggering
+    try:
+        prog = float(r.get('progress', 0) or 0)
+        total = float(r.get('total', 0) or 0)
+        if total > 0 and prog < total:
+            need_refresh = True
+    except Exception:
+        pass
+    if need_refresh:
         try:
             from streamlit_autorefresh import st_autorefresh
             st_autorefresh(interval=1500, limit=100000, key='autoRefresh')
         except Exception:
             import time as _t
-            last = st.session_state.runner.get('last_auto_refresh', 0.0)
+            last = r.get('last_auto_refresh', 0.0)
             now  = _t.time()
             if now - last > 1.5:
-                st.session_state.runner['last_auto_refresh'] = now
+                r['last_auto_refresh'] = now
+                st.session_state.runner = r
                 st.experimental_rerun()
 except Exception:
     pass
