@@ -1,6 +1,19 @@
 # streamlit_app.py
 import os, time, json, threading, queue, pathlib
 import pandas as pd
+
+# ---- Auto-refresh helper (no external dependency) ----
+def ___AUTOREFRESH___():
+    import time as _t
+    r = st.session_state.get('runner', {}) if isinstance(st.session_state.get('runner', {}), dict) else {}
+    last = r.get('last_auto_refresh', 0.0)
+    now  = _t.time()
+    # throttle to at most ~1 rerun / 1.5s
+    if now - last > 1.5:
+        r['last_auto_refresh'] = now
+        st.session_state.runner = r
+        st.rerun()
+# ------------------------------------------------------
 import streamlit as st
 
 from ki_rep_monitor import run_pipeline
@@ -293,11 +306,7 @@ try:
     except Exception:
         pass
     if need_refresh:
-        try:
-            from streamlit_autorefresh import st_autorefresh
-            st_autorefresh(interval=1500, limit=100000, key='autoRefresh')
-        except Exception:
-            st.experimental_rerun()
+        ___AUTOREFRESH___()
 except Exception:
     pass
     # 2) Status-based triggering
@@ -314,8 +323,8 @@ except Exception:
         pass
     if need_refresh:
         try:
-            from streamlit_autorefresh import st_autorefresh
-            st_autorefresh(interval=1500, limit=100000, key='autoRefresh')
+            # streamlit_autorefresh not available; using st.rerun() throttle
+            ___AUTOREFRESH___()
         except Exception:
             import time as _t
             last = r.get('last_auto_refresh', 0.0)
@@ -323,7 +332,7 @@ except Exception:
             if now - last > 1.5:
                 r['last_auto_refresh'] = now
                 st.session_state.runner = r
-                st.experimental_rerun()
+                st.rerun()
 except Exception:
     pass
 
