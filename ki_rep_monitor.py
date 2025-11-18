@@ -1252,13 +1252,19 @@ def compute_stability_metrics(df_norm: pd.DataFrame, df_evi: pd.DataFrame) -> pd
 
     # Stability metrics across runs
     df_stab = compute_stability_metrics(df_norm, df_evi)
-
-    with pd.ExcelWriter(out_xlsx, engine="openpyxl") as xlw:
-        if not df_runs.empty: df_runs.to_excel(excel_writer=xlw, sheet_name="Runs", index=False)
-        if not df_norm.empty: df_norm.to_excel(excel_writer=xlw, sheet_name="Normalized", index=False)
-        if not df_evi.empty:  df_evi.to_excel(excel_writer=xlw, sheet_name="Evidence", index=False)
-        if not df_cfg.empty:  df_cfg.to_excel(excel_writer=xlw, sheet_name="Config", index=False)
-        if not df_raw.empty:  df_raw.to_excel(excel_writer=xlw, sheet_name="RawAnswers", index=False)
-        if 'df_stab' in locals() and not df_stab.empty: df_stab.to_excel(excel_writer=xlw, sheet_name="Stability_Metrics", index=False)
-
+    
+    dbg("export_start", f"Schreibe Excel: {out_xlsx}")
+    try:
+        with pd.ExcelWriter(out_xlsx, engine="openpyxl") as xlw:
+            if not df_runs.empty:  df_runs.to_excel(excel_writer=xlw, sheet_name="Runs", index=False)
+            if not df_norm.empty:  df_norm.to_excel(excel_writer=xlw, sheet_name="Normalized", index=False)
+            if not df_evi.empty:   df_evi.to_excel(excel_writer=xlw, sheet_name="Evidence", index=False)
+            if not df_cfg.empty:   df_cfg.to_excel(excel_writer=xlw, sheet_name="Config", index=False)
+            if not df_raw.empty:   df_raw.to_excel(excel_writer=xlw, sheet_name="RawAnswers", index=False)
+            if "df_stab" in locals() and df_stab is not None and not df_stab.empty:
+                df_stab.to_excel(excel_writer=xlw, sheet_name="Stability_Metrics", index=False)
+    except Exception as ex:
+        dbg("export_error", str(ex))
+        raise
+    dbg("export_done", out_xlsx)
     return {"out": out_xlsx, "runs": len(df_runs), "norm": len(df_norm), "evi": len(df_evi)}
