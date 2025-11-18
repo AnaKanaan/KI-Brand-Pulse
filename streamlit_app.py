@@ -7,6 +7,36 @@ from ki_rep_monitor import run_pipeline
 
 st.set_page_config(page_title='KI-Reputation Monitor', layout='wide')
 st.title('🔎 KI-Reputation Monitor — Final3')
+st.markdown(
+    """
+    <div style='margin: 0.8rem 0; font-size: 1.05rem;'>
+    <strong>„Was erzählt die KI‑Landschaft aktuell über meine Marke / mein Thema – und auf welcher Wissensbasis?“</strong><br>
+    <em>„Wir messen, wie KI‑Assistenten deinen Ruf formen: welche Antworten Nutzer*innen bekommen, welche Quellen dahinterstehen und wie stabil diese Bilder sind.“</em>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
+with st.expander("ℹ️ Definitionen & Legende", expanded=False):
+    st.markdown("""
+**Profile (konzeptionell)**  
+- **NO_SEARCH** (z. B. `CHATGPT_NO_SEARCH`, `GEMINI_NO_SEARCH`): Antwort ohne Websuche, auf Basis von Modellwissen. *Citations* sind leer (`[]`) bzw. nur aus Modellwissen.  
+- **SEARCH_AUTO** (z. B. `CHATGPT_SEARCH_AUTO`, `GEMINI_SEARCH_AUTO`): LLM führt Suche aus (Google/Browse), extrahiert **Evidence** (Titel, URL, Domain, Datum/Snippet) und begründet Antworten.  
+- **GOOGLE_OVERVIEW**: kompakter Überblick mit Quellenlisten („Top‑Treffer“) für schnelle Orientierung.
+
+**KPIs & Scores**  
+- **Alter (`age_days`)**: Differenz in Tagen zwischen `published_at` und jetzt.  
+- **Freshness‑Bucket**: `today` / `≤7d` / `≤30d` / `≤90d` / `≤365d` / `>365d`.  
+- **Freshness‑Index**: \\(\\text{avg}\\big(e^{-(\\text{age\\_days}/90)}\\big)\\) über alle Evidenzen (0..1; höher = aktueller).  
+- **Sentiment‑Score**: kontinuierlich in \\([-1, +1]\\).  
+- **Sentiment‑Label**: Schwellen −0.2 / +0.2 ⇒ *negativ* / *neutral* / *positiv*.  
+- **Visibility**: \\([0,1]\\) – „Wie prominent steht die Marke im Antworttext im Fokus?“  
+- **Inclusion**: boolesch – ob die Antwort gemäß Codierung **auf Thema/Marke einzahlt** (Accepted) oder nicht (Rejected).
+
+**Hinweise zur Erhebung**  
+- *Visibility, Sentiment* werden in **Pass B** explizit im Prompt definiert und von der LLM codiert.  
+- *Alter, Freshness* werden **nachträglich** aus den Evidenz‑Feldern berechnet.  
+- *Inclusion* folgt der Klassifikation (Accepted/Rejected) aus der Codierung.
+""")
 
 # =========================================================
 # Session init (nur im UI-Thread)
@@ -42,6 +72,7 @@ with st.expander('🔐 API-Keys (nur Session, keine Speicherung)'):
 # =========================================================
 with st.sidebar:
     st.markdown("### Konfiguration")
+    st.caption("**Wrapper‑Modi:**\n\n- **free_emulation**: das LLM antwortet frei ohne Zusatzrahmen.\n- **stabilized**: strengere Anweisungen & Formatvorgaben, konsistentere Struktur (z. B. JSON), Quellenhinweise, knappe Antworten.")
     brand  = st.text_input('Brand', 'DAK')
     topic  = st.text_input('Topic', 'KI im Gesundheitswesen')
     market = st.text_input('Market', 'DE')
@@ -61,7 +92,7 @@ with st.sidebar:
     # Stakeholder perspective selection.  If none selected a generic perspective is used.
     stakeholders = st.multiselect(
         'Stakeholders',
-        ['generic', 'Bewerber', 'Investor', 'Mitarbeitender', 'Endkonsument', 'Business-Kunde', 'Business-Partner', 'Provider', 'Politischer Entscheider'],
+        ['generic', 'Bewerber', 'Investor', 'Mitarbeitender', 'Endkonsument', 'Business-Kunde', 'Business-Partner', 'Provider', 'Entscheidungsträger aus Politik und Verwaltung'],
         default=['generic']
     )
 
@@ -76,22 +107,10 @@ with st.sidebar:
     temp_no    = st.slider('Temp (Chat no search)', 0.0, 1.2, 0.5, 0.05)
     temp_auto  = st.slider('Temp (Chat auto-search)', 0.0, 1.2, 0.25, 0.05)
     # Increase default token limits for Pass A to accommodate longer responses
-    max_tokens = st.number_input('max_output_tokens (Pass A, no search)', 100, 4096, 4000, 50)
-    max_tokens_search = st.number_input('max_output_tokens (Pass A, search)', 200, 8192, 4000, 50)
+    max_tokens = 4000
+    max_tokens_search = 4000
     wrapper_mode = st.selectbox('Pass-A Wrapper', ['free_emulation','stabilized'], index=0)
 
-    st.markdown("### Model Settings")
-    # Default models now reflect the GPT‑5.1 series.  GPT‑5.1 Instant is
-    # exposed as gpt-5.1-chat-latest, while GPT‑5.1 Thinking is available as
-    # gpt-5.1【677344943524217†L566-L569】.  These defaults can be overridden by
-    # environment variables.
-    model_chat   = st.text_input('Model (Pass A: Antwort)', os.getenv("MODEL_CHAT", "gpt-5.1-chat-latest"))
-    model_pass_b = st.text_input('Model (Pass B: Codierung)', os.getenv("MODEL_PASS_B", "gpt-5.1"))
-
-    if st.button('Apply Model Settings'):
-        os.environ["MODEL_CHAT"]   = model_chat.strip()
-        os.environ["MODEL_PASS_B"] = model_pass_b.strip()
-        st.success("Modelle gesetzt.")
 
     uploaded = st.file_uploader('Question Library (xlsx, optional)', type=['xlsx'])
     question_xlsx = uploaded if uploaded is not None else 'ki_question_library.xlsx'
@@ -165,6 +184,15 @@ def start_worker():
     try:
         cols = list(pd.read_excel(q_path, sheet_name="Questions").columns)
         st.sidebar.write("Questions sheet columns:", cols)
+        show_preview = st.sidebar.checkbox("Fragen‑Vorschau (bis 5 Zeilen)", value=False)
+        if show_preview:
+            try:
+                df_prev = pd.read_excel(q_path, sheet_name="Questions").head(5)
+            except Exception:
+                xl = pd.ExcelFile(q_path)
+                sheet = next((s for s in xl.sheet_names if s in ["de","en","fr","it","rm"]), xl.sheet_names[0])
+                df_prev = pd.read_excel(q_path, sheet_name=sheet).head(5)
+            st.sidebar.dataframe(df_prev, use_container_width=True, hide_index=True)
     except Exception as ex:
         st.sidebar.write("Questions sheet columns: <Fehler>", str(ex))
 
@@ -203,7 +231,7 @@ def start_worker():
                 brand=brand, topic=topic, market=market,
                 languages=languages, profiles=profiles,
                 question_xlsx=q_path, out_xlsx=out_name,
-                domain_seed_csv='domain_type_seed.csv',
+                domain_seed_csv='domain_type_prompt.csv',
                 coder_prompts_json='coder_prompts_passB.json',
                 topn=int(topn), num_runs=int(num_runs),
                 categories=categories, question_ids=parse_ids(question_ids_raw),
@@ -246,6 +274,21 @@ if clear_btn:
 
 # =========================================================
 # Live-Status & Logs
+try:
+    if st.session_state.runner.get('thread') and st.session_state.runner['thread'].is_alive():
+        try:
+            from streamlit_autorefresh import st_autorefresh
+            st_autorefresh(interval=1500, limit=100000, key='autoRefresh')
+        except Exception:
+            import time as _t
+            last = st.session_state.runner.get('last_auto_refresh', 0.0)
+            now  = _t.time()
+            if now - last > 1.5:
+                st.session_state.runner['last_auto_refresh'] = now
+                st.experimental_rerun()
+except Exception:
+    pass
+
 # =========================================================
 is_running = bool(st.session_state.runner.get("thread") and st.session_state.runner["thread"].is_alive())
 jobs_done  = st.session_state.runner.get("jobs_done", 0)

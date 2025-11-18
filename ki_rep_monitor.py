@@ -82,17 +82,30 @@ def known_freshness_pct(evidence: List[Dict[str, Any]]) -> float:
 # =========================================================
 # HTTP / LLM
 # =========================================================
+
 def openai_responses(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """POST to OpenAI Responses API with lightweight retries. Retries on 429/5xx."""
     key = require_env_runtime("OPENAI_API_KEY")
-    r = requests.post(
-        f"{OPENAI_BASE}/responses",
-        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-        data=json.dumps(payload),
-        timeout=120
-    )
-    if r.status_code >= 400:
-        raise RuntimeError(f"OpenAI HTTP {r.status_code}: {r.text}")
-    return r.json()
+    url = f"{OPENAI_BASE}/responses"
+    last_err = None
+    for attempt in range(1, 4):
+        try:
+            r = requests.post(
+                url,
+                headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+                data=json.dumps(payload),
+                timeout=120
+            )
+            if r.status_code < 400:
+                return r.json()
+            if r.status_code in (429, 500, 502, 503, 504) and attempt < 3:
+                time.sleep(0.8 * attempt); continue
+            raise RuntimeError(f"OpenAI HTTP {r.status_code}: {r.text}")
+        except Exception as ex:
+            last_err = ex
+            if attempt < 3:
+                time.sleep(0.8 * attempt); continue
+            raise RuntimeError(f"OpenAI request failed after {attempt} attempts: {last_err}")
 
 def gemini_generate_text(prompt: str, system: Optional[str] = None, model: Optional[str] = None) -> str:
     """
@@ -576,12 +589,11 @@ def call_chat_no_search(prompt: str, temperature: float = 0.5, max_tokens: int =
         # or a list of messages for ``input``.  A single string is sufficient
         # for one-shot interactions.
         "input": prompt,
-        "temperature": float(temperature),
         "max_output_tokens": int(max_tokens)
     }
     data = openai_responses(payload)
     text = extract_text_from_responses(data)
-    return text, {"status": response_status(data), "raw": data}
+    return text, {"status": response_status(data), "citations": [], "raw": data}
 
 def call_chat_search_auto(prompt: str,
                           temperature: float = 0.25,
@@ -745,6 +757,41 @@ def call_gemini_search_auto(prompt: str, lang: str, market: str = "", topn: int 
 # =========================================================
 # Hauptpipeline
 # =========================================================
+
+
+def load_stakeholder_lib(path: str) -> Dict[str, Any]:
+    lib = {"map": {}, "langs": {}}
+    try:
+        xl = pd.ExcelFile(path)
+        if "map" in xl.sheet_names:
+            dfm = pd.read_excel(xl, sheet_name="map")
+            for _, r in dfm.iterrows():
+                lib["map"][str(r.get("ui_label_de")).strip()] = str(r.get("stakeholder_id")).strip()
+        for lang in ["de","en","fr","it","rm"]:
+            if lang in xl.sheet_names:
+                df = pd.read_excel(xl, sheet_name=lang)
+                d = {}
+                for _, r in df.iterrows():
+                    sid = str(r.get("stakeholder_id")).strip()
+                    d[sid] = {
+                        "display": ("" if pd.isna(r.get("display")) else str(r.get("display")).strip()),
+                        "prefix_template": ("" if pd.isna(r.get("prefix_template")) else str(r.get("prefix_template")))
+                    }
+                lib["langs"][lang] = d
+    except Exception as ex:
+        dbg("stakeholder_lib_error", str(ex))
+    return lib
+
+def build_stakeholder_prompt(base_q: str, stake_ui_label: str, lang: str, lib_path: str) -> str:
+    lib = load_stakeholder_lib(lib_path)
+    sid = lib["map"].get(stake_ui_label, "generic")
+    loc = lib["langs"].get(lang, {}).get(sid, {"display":"", "prefix_template":""})
+    display = loc.get("display","")
+    prefix_template = loc.get("prefix_template","")
+    Q = base_q.replace("<STAKEHOLDER>", display if display else stake_ui_label)
+    if "<STAKEHOLDER>" not in base_q and sid != "generic" and prefix_template:
+        Q = f"{prefix_template.format(stakeholder=display)} {Q}"
+    return Q
 def run_pipeline(
     brand: str, topic: str, market: str,
     languages: List[str], profiles: List[str],
@@ -872,14 +919,8 @@ def run_pipeline(
                     provider = "openai"
                     model_version = MODEL_CHAT
 
-                    # incorporate stakeholder into the question
-                    Q = base_q.replace("<STAKEHOLDER>", stake)
-                    # if placeholder not present and stakeholder specific
-                    if "<STAKEHOLDER>" not in base_q and stake != "generic":
-                        if lang == "de":
-                            Q = f"Aus Sicht eines {stake}: {Q}"
-                        else:
-                            Q = Q  # can prefix in other languages if needed
+                    # incorporate stakeholder via library mapping
+                    Q = build_stakeholder_prompt(base_q, stake, lang, lib_path=os.path.join(base_dir, "stakeholder_library.xlsx"))
 
                     dbg("build_prompt", f"Frage {qid} / {profile} / r{r+1} Prompt: {Q}")
 
@@ -902,7 +943,7 @@ def run_pipeline(
                             user_loc = None
                             if market:
                                 user_loc = {"type": "approximate", "country": market}
-                            raw_text, meta_a = call_chat_search_auto(
+                            raw_text, meta_a = call_gemini_search_auto(
                                 Q,
                                 temperature=temperature_chat_search,
                                 max_tokens=mtoks,
@@ -933,12 +974,14 @@ def run_pipeline(
                             provider = "google"
                             model_version = "overview-substitute"
                         elif profile == "GEMINI_NO_SEARCH":
+                        # use Gemini wrapper
                             dbg("api_call_1_request", "Gemini (no search) Anfrage")
                             raw_text, meta_g = call_gemini_no_search(Q, temperature=0.2, max_tokens=max_tokens)
                             meta_a = meta_g
                             provider = "gemini"
                             model_version = DEFAULT_GEMINI_MODEL
                         elif profile == "GEMINI_SEARCH_AUTO":
+                        # use Gemini search wrapper
                             dbg("api_call_1_request", "Gemini (search auto) Anfrage")
                             mtoks = int(passA_search_tokens or max(max_tokens, 4000))
                             raw_text, meta_g = call_gemini_search_auto(Q, lang=lang, market=market, topn=topn,
@@ -1092,12 +1135,120 @@ def run_pipeline(
         # after finishing question
     # end question loop
 
-    # ---------- Export (pandas 3.0 keyword-only)
+    
+def _sentiment_label_from_score(x: Optional[float]) -> str:
+    if x is None: return "unknown"
+    try:
+        v = float(x)
+    except Exception:
+        return "unknown"
+    if v <= -0.2: return "negative"
+    if v >= 0.2:  return "positive"
+    return "neutral"
+
+def _avg_pairwise_jaccard(list_of_sets: List[Set[str]]) -> Optional[float]:
+    n = len(list_of_sets)
+    if n < 2: return None
+    import itertools
+    s = 0.0; k = 0
+    for a,b in itertools.combinations(list_of_sets, 2):
+        u = len(a.union(b)); j = 1.0 if u==0 else len(a.intersection(b))/u
+        s += j; k += 1
+    return s/k if k else None
+
+QUALITY_FLAG_WEIGHTS: Dict[str, float] = {
+    "HALLUCINATION_SUSPECTED": 1.0,
+    "CONFUSES_WITH_OTHER_BRAND": 0.9,
+    "OUTDATED_INFO": 0.7,
+    "MISSING_KEY_ASPECTS": 0.6,
+    "UNSUPPORTED_SUPERLATIVES": 0.5,
+    "INCOHERENT_OR_OFF_TOPIC": 0.7,
+    "SOURCE_BIAS_RISK": 0.5,
+    "DATA_MISMATCH": 0.7,
+    "REGION_CONTEXT_MISMATCH": 0.6,
+    "OTHER_QUALITY_ISSUE": 0.3,
+}
+def _quality_indices(flags) -> (float, float):
+    if not isinstance(flags, (list, tuple)): return 0.0, 1.0
+    total = 0.0; seen = set()
+    for f in flags:
+        if not f: continue
+        k = str(f).strip().upper()
+        if k in seen: continue
+        seen.add(k); total += float(QUALITY_FLAG_WEIGHTS.get(k, 0.3))
+    risk = min(1.0, max(0.0, total)); score = 1.0 - risk
+    return risk, score
+
+def compute_stability_metrics(df_norm: pd.DataFrame, df_evi: pd.DataFrame) -> pd.DataFrame:
+    if df_norm is None or df_norm.empty: return pd.DataFrame()
+    df = df_norm.copy()
+    if "sentiment_label" not in df.columns:
+        df["sentiment_label"] = df.get("aspect_scores.sentiment").apply(_sentiment_label_from_score)
+    keys = ["question_id","profile","language","stakeholder","category","intent","variant"]
+    for k in keys:
+        if k not in df.columns: df[k] = None
+    domap = {}
+    if df_evi is not None and not df_evi.empty and "run_id" in df_evi.columns:
+        for rid, g in df_evi.groupby("run_id"):
+            domap[rid] = set([str(x).lower() for x in g["domain"].dropna().tolist() if str(x).strip()])
+    rows = []
+    for grp, g in df.groupby(keys, dropna=False):
+        runs = g["run_id"].tolist() if "run_id" in g.columns else []
+        if len(runs) < 2: continue
+        mode = g["sentiment_label"].mode(); top = mode.iloc[0] if not mode.empty else "unknown"
+        agree = (g["sentiment_label"] == top).mean()
+        def to_sets(col):
+            vals = []
+            if col in g.columns:
+                for v in g[col].tolist():
+                    if isinstance(v, list): vals.append(set([str(s).strip().lower() for s in v if str(s).strip()]))
+                    else: vals.append(set())
+            return vals
+        narr_sets = to_sets("aspect_scores.narrative")
+        risk_sets  = to_sets("aspect_scores.risk_flags")
+        qual_sets  = to_sets("aspect_scores.quality_flags")
+        narr_j = _avg_pairwise_jaccard(narr_sets)
+        risk_j = _avg_pairwise_jaccard(risk_sets)
+        qual_j = _avg_pairwise_jaccard(qual_sets)
+        src_sets = [domap.get(rid, set()) for rid in runs]
+        src_j = _avg_pairwise_jaccard(src_sets)
+        risk_vals = []; score_vals = []
+        if "aspect_scores.quality_flags" in g.columns:
+            for flags in g["aspect_scores.quality_flags"].tolist():
+                r,s = _quality_indices(flags); risk_vals.append(r); score_vals.append(s)
+        avg_risk = sum(risk_vals)/len(risk_vals) if risk_vals else None
+        avg_score = sum(score_vals)/len(score_vals) if score_vals else None
+        d = dict(zip(keys, grp))
+        d.update({
+            "num_runs": len(runs),
+            "agreement_rate_sentiment": round(float(agree),4) if agree is not None else None,
+            "jaccard_narrative_avg": round(float(narr_j),4) if narr_j is not None else None,
+            "jaccard_risk_flags_avg": round(float(risk_j),4) if risk_j is not None else None,
+            "jaccard_quality_flags_avg": round(float(qual_j),4) if qual_j is not None else None,
+            "jaccard_sources_avg": round(float(src_j),4) if src_j is not None else None,
+            "top_sentiment_label": top,
+            "avg_quality_risk_index": round(float(avg_risk),4) if avg_risk is not None else None,
+            "avg_quality_score": round(float(avg_score),4) if avg_score is not None else None,
+        })
+        rows.append(d)
+    return pd.DataFrame(rows)
+
+# ---------- Export (pandas 3.0 keyword-only)
     df_runs = pd.DataFrame(runs_rows)
     df_norm = pd.json_normalize(norm_rows, max_level=2) if norm_rows else pd.DataFrame()
     df_evi  = pd.DataFrame(ev_rows)
     df_cfg  = pd.DataFrame(cfg_rows)
     df_raw  = pd.DataFrame(raw_rows)
+
+    # Per-run quality indices on Normalized
+    if not df_norm.empty and 'aspect_scores.quality_flags' in df_norm.columns:
+        _risk=[]; _score=[]
+        for flags in df_norm['aspect_scores.quality_flags'].tolist():
+            r,s = _quality_indices(flags); _risk.append(r); _score.append(s)
+        df_norm['quality_risk_index'] = _risk; df_norm['quality_score'] = _score
+
+    # Stability metrics across runs
+    df_stab = compute_stability_metrics(df_norm, df_evi)
 
     with pd.ExcelWriter(out_xlsx, engine="openpyxl") as xlw:
         if not df_runs.empty: df_runs.to_excel(excel_writer=xlw, sheet_name="Runs", index=False)
@@ -1105,5 +1256,6 @@ def run_pipeline(
         if not df_evi.empty:  df_evi.to_excel(excel_writer=xlw, sheet_name="Evidence", index=False)
         if not df_cfg.empty:  df_cfg.to_excel(excel_writer=xlw, sheet_name="Config", index=False)
         if not df_raw.empty:  df_raw.to_excel(excel_writer=xlw, sheet_name="RawAnswers", index=False)
+        if 'df_stab' in locals() and not df_stab.empty: df_stab.to_excel(excel_writer=xlw, sheet_name="Stability_Metrics", index=False)
 
     return {"out": out_xlsx, "runs": len(df_runs), "norm": len(df_norm), "evi": len(df_evi)}

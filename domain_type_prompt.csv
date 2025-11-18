@@ -1,0 +1,11 @@
+domain_type,tld_hints,keyword_hints,example_domains
+CORPORATE,.com;.de;.ch;.at,press;newsroom;investor relations;ir;unternehmen;about us;presse,siemens.com;openai.com;swisscom.ch;novartis.com;bosch.com
+NEWS_MEDIA,.de;.ch;.at;.fr;.it,news;nachrichten;journal;magazine;zeitung;tv;radio;regional;lokal,spiegel.de;nzz.ch;lemonde.fr;corriere.it;tagesanzeiger.ch;berliner-zeitung.de
+TRADE_PROFESSIONAL,,industry;branchen;fach;special interest;tech;marketing;telecom;energie;gesundheit,heise.de;horizont.net;electrive.net;pv-magazine.com;medinside.ch
+GOV_PUBLIC,.gov;.gouv.fr;.admin.ch;.gv.at,ministerium;bundesamt;official;regulator;gouvernement;departement;amt,admin.ch;bund.de;bmf.gv.at;gouvernement.fr;europa.eu
+NGO_ASSOCIATION,.org,ngo;verband;stiftung;association;union;guild;verband,amnesty.org;transparency.org;wwf.org;vdma.org
+RESEARCH_EDUCATION,.edu;.ac.uk;.ch,university;institute;journal;research;paper;preprint;hochschule,ethz.ch;unil.ch;uni-bonn.de;ox.ac.uk;arxiv.org
+REVIEW_PLATFORM,.com,reviews;bewertungen;vergleich;rating;price comparison,trustpilot.com;google.com;check24.de;comparis.ch
+SOCIAL_PLATFORM,.com,linkedin;twitter;x;facebook;instagram;youtube;tiktok;reddit,linkedin.com;x.com;facebook.com;instagram.com;youtube.com;tiktok.com;reddit.com
+BLOG_FORUM,.com;.io;.net,blog;forum;stackexchange;stackoverflow;discourse;substack;wordpress;medium,medium.com;substack.com;wordpress.com;reddit.com;stackexchange.com;stackoverflow.com
+OTHER_UNKNOWN,,,
