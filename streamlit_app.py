@@ -408,21 +408,27 @@ with log_box:
 if not is_running:
     out_file = None
     try:
-        if st.session_state.runner.get('expected_xlsx') and os.path.exists(st.session_state.runner['expected_xlsx']):
-            out_file = st.session_state.runner['expected_xlsx']
+        expected = st.session_state.runner.get('expected_xlsx')
+        if expected and os.path.exists(expected):
+            out_file = expected
         else:
             candidates = []
-            for d in {BASE_DIR, '.'}:
+            search_dirs = set()
+            if expected:
+                search_dirs.add(os.path.dirname(expected))
+            search_dirs.add(BASE_DIR)
+            search_dirs.add(".")
+            for d in list(search_dirs):
                 try:
                     for f in os.listdir(d):
-                        if f.startswith('out_') and f.endswith('.xlsx'):
+                        if f.startswith("out_") and f.endswith(".xlsx"):
                             candidates.append(os.path.join(d, f))
                 except FileNotFoundError:
-            continue
-        if candidates:
-            out_file = max(candidates, key=lambda p: os.path.getmtime(p))
+                    continue
+            if candidates:
+                out_file = max(candidates, key=lambda p: os.path.getmtime(p))
     except Exception:
-        pass
+        out_file = None
     if out_file and os.path.exists(out_file):
         st.success(f'Fertig: {out_file}')
         with open(out_file, "rb") as fh:
