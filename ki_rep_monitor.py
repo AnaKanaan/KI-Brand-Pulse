@@ -569,7 +569,7 @@ def _canonize_questions_df(q: pd.DataFrame) -> pd.DataFrame:
 # =========================================================
 def call_chat_no_search(prompt: str, temperature: float = 0.5, max_tokens: int = 900):
     """
-    Call the ChatGPT model without explicit web search.  When using the
+    Call the ChatGPT model without explicit web search. (Sampling parameters like temperature are ignored for GPT‑5/5.1.)  When using the
     Responses API, omitting the ``web_search`` tool allows the model to decide
     whether to use its internal knowledge or perform lightweight retrieval.  We
     request the GPT‑5.1 Instant model (``MODEL_CHAT``) and return the answer
@@ -577,7 +577,7 @@ def call_chat_no_search(prompt: str, temperature: float = 0.5, max_tokens: int =
 
     Args:
         prompt: The plain user prompt.
-        temperature: Sampling temperature (0.0–1.0).
+        temperature (ignored): Sampling temperature (0.0–1.0).
         max_tokens: Maximum number of output tokens.
 
     Returns:
@@ -619,7 +619,7 @@ def call_chat_search_auto(prompt: str,
 
     Args:
         prompt: Question string for ChatGPT.
-        temperature: Sampling temperature for the language model.
+        temperature (ignored): Sampling temperature for the language model.
         max_tokens: Output token limit.
         search_context_size: Level of search context (``low``, ``medium``, or
             ``high``).  Higher values yield more comprehensive results but are
@@ -946,7 +946,7 @@ def run_pipeline(
                             user_loc = None
                             if market:
                                 user_loc = {"type": "approximate", "country": market}
-                            raw_text, meta_a = call_gemini_search_auto(
+                            raw_text, meta_a = call_chat_search_auto(
                                 Q,
                                 temperature=temperature_chat_search,
                                 max_tokens=mtoks,
