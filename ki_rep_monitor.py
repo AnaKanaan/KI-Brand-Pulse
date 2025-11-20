@@ -73,13 +73,32 @@ def freshness_bucket(age_days: Optional[int]) -> str:
     return ">365d"
 
 def freshness_index(evidence: List[Dict[str, Any]]) -> float:
-    vals = [math.exp(-float(e.get("age_days", 0)) / 90.0)
-            for e in evidence if isinstance(e.get("age_days"), (int, float))]
+    vals = []
+    for e in (evidence or []):
+        a = _safe_age_days(e.get("age_days"))
+        if a is None:
+            continue
+        # exp(-a/90); clamp exponent to avoid overflow if a would be negative or extreme
+        expo = max(0.0, min(a / 90.0, 100.0))
+        vals.append(math.exp(-expo))
     return sum(vals) / len(vals) if vals else 0.0
 
 def known_freshness_pct(evidence: List[Dict[str, Any]]) -> float:
     return (sum(1 for e in evidence if e.get("age_days") is not None) / len(evidence)) if evidence else 0.0
 
+
+def _safe_age_days(v):
+    try:
+        if v is None:
+            return None
+        x = float(v)
+        if x < 0:
+            x = 0.0
+        if x != x:  # NaN
+            return None
+        return x
+    except Exception:
+        return None
 # =========================================================
 # HTTP / LLM
 # =========================================================
@@ -521,7 +540,7 @@ def enrich_evidence(evidence: List[Dict[str, Any]], domain_seed_csv: str) -> Lis
             pub_dt = datetime.fromisoformat(str(pub).replace("Z", "+00:00")) if pub else None
         except Exception:
             pub_dt = None
-        age_days = (now - pub_dt).days if pub_dt else None
+        age_days = _safe_age_days(\1)
 
         out.append({
             "title": e.get("title"),
@@ -569,7 +588,7 @@ def _canonize_questions_df(q: pd.DataFrame) -> pd.DataFrame:
 # =========================================================
 def call_chat_no_search(prompt: str, temperature: float = 0.5, max_tokens: int = 900):
     """
-    Call the ChatGPT model without explicit web search. (Sampling parameters like temperature are ignored for GPT‑5/5.1.)  When using the
+    Call the ChatGPT model without explicit web search.  When using the
     Responses API, omitting the ``web_search`` tool allows the model to decide
     whether to use its internal knowledge or perform lightweight retrieval.  We
     request the GPT‑5.1 Instant model (``MODEL_CHAT``) and return the answer
@@ -577,7 +596,7 @@ def call_chat_no_search(prompt: str, temperature: float = 0.5, max_tokens: int =
 
     Args:
         prompt: The plain user prompt.
-        temperature (ignored): Sampling temperature (0.0–1.0).
+        temperature: Sampling temperature (0.0–1.0).
         max_tokens: Maximum number of output tokens.
 
     Returns:
@@ -619,7 +638,7 @@ def call_chat_search_auto(prompt: str,
 
     Args:
         prompt: Question string for ChatGPT.
-        temperature (ignored): Sampling temperature for the language model.
+        temperature: Sampling temperature for the language model.
         max_tokens: Output token limit.
         search_context_size: Level of search context (``low``, ``medium``, or
             ``high``).  Higher values yield more comprehensive results but are
@@ -946,7 +965,7 @@ def run_pipeline(
                             user_loc = None
                             if market:
                                 user_loc = {"type": "approximate", "country": market}
-                            raw_text, meta_a = call_chat_search_auto(
+                            raw_text, meta_a = call_gemini_search_auto(
                                 Q,
                                 temperature=temperature_chat_search,
                                 max_tokens=mtoks,
