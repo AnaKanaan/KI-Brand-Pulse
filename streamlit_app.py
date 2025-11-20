@@ -2,6 +2,9 @@
 import os, time, json, threading, queue, pathlib
 import pandas as pd
 
+# Base directory for resolving relative resource paths
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 # ---- Auto-refresh helper (no external dependency) ----
 def ___AUTOREFRESH___():
     import time as _t
@@ -173,7 +176,7 @@ def eta_text(done: int, total: int, start_t: float) -> str:
 
 def save_uploaded_file_to_tmp(uploaded_file) -> str:
     if isinstance(uploaded_file, str):
-        return uploaded_file
+        return uploaded_file if os.path.isabs(uploaded_file) else os.path.join(BASE_DIR, uploaded_file)
     path = f"/tmp/_qlib_{int(time.time())}.xlsx"
     with open(path, "wb") as f:
         f.write(uploaded_file.getbuffer())
@@ -210,7 +213,7 @@ def start_worker():
     except Exception as ex:
         st.sidebar.write("Questions sheet columns: <Fehler>", str(ex))
 
-    out_name = f'out_{int(time.time())}.xlsx'
+    out_name = os.path.join(BASE_DIR, f'out_{int(time.time())}.xlsx')
     st.session_state.runner['expected_xlsx'] = out_name
     cancel_event = threading.Event()
     st.session_state.runner["cancel"] = cancel_event
@@ -246,8 +249,8 @@ def start_worker():
                 brand=brand, topic=topic, market=market,
                 languages=languages, profiles=profiles,
                 question_xlsx=q_path, out_xlsx=out_name,
-                domain_seed_csv='domain_type_prompt.csv',
-                coder_prompts_json='coder_prompts_passB.json',
+                domain_seed_csv=os.path.join(BASE_DIR, 'domain_type_prompt.csv'),
+                coder_prompts_json=os.path.join(BASE_DIR, 'coder_prompts_passB.json'),
                 topn=int(topn), num_runs=int(num_runs),
                 categories=categories, question_ids=parse_ids(question_ids_raw),
                 comp1=comp1, comp2=comp2, comp3=comp3,
@@ -369,6 +372,9 @@ with log_box:
             meta = ev.get("meta") or {}
             st.session_state.runner["jobs_done"]  = int(meta.get("done", 0))
             st.session_state.runner["jobs_total"] = int(meta.get("total", 0))
+            # expose for auto-refresh logic as well
+            st.session_state.runner['progress'] = int(meta.get('done', 0))
+            st.session_state.runner['total']    = int(meta.get('total', 0))
 
         phase = ev.get("phase", "")
         msg   = ev.get("msg", "")
@@ -405,16 +411,25 @@ if not is_running:
         if st.session_state.runner.get('expected_xlsx') and os.path.exists(st.session_state.runner['expected_xlsx']):
             out_file = st.session_state.runner['expected_xlsx']
         else:
-            candidates = [f for f in os.listdir('.') if f.startswith('out_') and f.endswith('.xlsx')]
-            if candidates:
-                out_file = max(candidates, key=lambda p: os.path.getmtime(p))
+            
+candidates = []
+for d in {BASE_DIR, '.'}:
+    try:
+        for f in os.listdir(d):
+            if f.startswith('out_') and f.endswith('.xlsx'):
+                candidates.append(os.path.join(d, f))
+    except FileNotFoundError:
+        continue
+if candidates:
+    out_file = max(candidates, key=lambda p: os.path.getmtime(p))
+
     except Exception:
         pass
 
     if out_file and os.path.exists(out_file):
         st.success(f'Fertig: {out_file}')
         with open(out_file, "rb") as fh:
-            st.download_button('📥 Download Excel', data=fh.read(), file_name=out_file)
+            st.download_button('📥 Download Excel', data=fh.read(), file_name=os.path.basename(out_file))
 
         try:
             xls = pd.ExcelFile(out_file)
