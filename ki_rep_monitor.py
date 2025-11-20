@@ -72,30 +72,36 @@ def freshness_bucket(age_days: Optional[int]) -> str:
     if age_days <= 365:  return "≤365d"
     return ">365d"
 
+
 def freshness_index(evidence: List[Dict[str, Any]]) -> float:
     vals = []
     for e in (evidence or []):
         a = _safe_age_days(e.get("age_days"))
         if a is None:
             continue
-        # exp(-a/90); clamp exponent to avoid overflow if a would be negative or extreme
-        expo = max(0.0, min(a / 90.0, 100.0))
-        vals.append(math.exp(-expo))
+        expo = max(0.0, min(a / 90.0, 100.0))  # clamp exponent range
+        try:
+            vals.append(math.exp(-expo))
+        except OverflowError:
+            # As a last resort, treat as effectively zero contribution
+            vals.append(0.0)
     return sum(vals) / len(vals) if vals else 0.0
+
 
 def known_freshness_pct(evidence: List[Dict[str, Any]]) -> float:
     return (sum(1 for e in evidence if e.get("age_days") is not None) / len(evidence)) if evidence else 0.0
 
 
 def _safe_age_days(v):
+    """Return non-negative float days or None; guards against NaN/negatives."""
     try:
         if v is None:
             return None
         x = float(v)
-        if x < 0:
-            x = 0.0
         if x != x:  # NaN
             return None
+        if x < 0:
+            x = 0.0
         return x
     except Exception:
         return None
@@ -540,7 +546,7 @@ def enrich_evidence(evidence: List[Dict[str, Any]], domain_seed_csv: str) -> Lis
             pub_dt = datetime.fromisoformat(str(pub).replace("Z", "+00:00")) if pub else None
         except Exception:
             pub_dt = None
-        age_days = _safe_age_days(\1)
+        age_days = (now - pub_dt).days if pub_dt else None
 
         out.append({
             "title": e.get("title"),
@@ -1287,3 +1293,13 @@ def compute_stability_metrics(df_norm: pd.DataFrame, df_evi: pd.DataFrame) -> pd
         raise
     dbg("export_done", out_xlsx)
     return {"out": out_xlsx, "runs": len(df_runs), "norm": len(df_norm), "evi": len(df_evi)}
+
+# ---- final return guard ----
+try:
+    _out = out_xlsx if 'out_xlsx' in locals() else ""
+    _runs = len(df_runs) if 'df_runs' in locals() else 0
+    _norm = len(df_norm) if 'df_norm' in locals() else 0
+    _evi  = len(df_evi)  if 'df_evi'  in locals() else 0
+    return {"out": _out, "runs": _runs, "norm": _norm, "evi": _evi}
+except Exception:
+    return {"out": "", "runs": 0, "norm": 0, "evi": 0}
