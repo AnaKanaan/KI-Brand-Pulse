@@ -412,11 +412,11 @@ if not is_running:
             out_file = st.session_state.runner['expected_xlsx']
         else:
             candidates = []
-for d in {BASE_DIR, '.'}:
-    try:
-        for f in os.listdir(d):
-            if f.startswith('out_') and f.endswith('.xlsx'):
-                candidates.append(os.path.join(d, f))
+            for d in {BASE_DIR, '.'}:
+                try:
+                    for f in os.listdir(d):
+                        if f.startswith('out_') and f.endswith('.xlsx'):
+                            candidates.append(os.path.join(d, f))
     except FileNotFoundError:
         continue
 if candidates:
