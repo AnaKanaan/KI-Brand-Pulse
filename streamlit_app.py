@@ -2,9 +2,6 @@
 import os, time, json, threading, queue, pathlib
 import pandas as pd
 
-# Base directory for resolving relative resource paths
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
 # ---- Auto-refresh helper (no external dependency) ----
 def ___AUTOREFRESH___():
     import time as _t
@@ -20,6 +17,7 @@ def ___AUTOREFRESH___():
 import streamlit as st
 
 from ki_rep_monitor import run_pipeline
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 st.set_page_config(page_title='KI-Reputation Monitor', layout='wide')
 st.title('🔎 KI-Reputation Monitor — Final3')
@@ -176,7 +174,9 @@ def eta_text(done: int, total: int, start_t: float) -> str:
 
 def save_uploaded_file_to_tmp(uploaded_file) -> str:
     if isinstance(uploaded_file, str):
-        return uploaded_file if os.path.isabs(uploaded_file) else os.path.join(BASE_DIR, uploaded_file)
+        if not os.path.isabs(uploaded_file):
+            return os.path.join(BASE_DIR, uploaded_file)
+        return uploaded_file
     path = f"/tmp/_qlib_{int(time.time())}.xlsx"
     with open(path, "wb") as f:
         f.write(uploaded_file.getbuffer())
@@ -363,8 +363,12 @@ st.markdown('### 🪵 Debug-Protokoll (live)')
 log_box = st.container()
 with log_box:
     drained = 0
-    while drained < 1000 and not st.session_state.runner["events"].empty():
-        ev = st.session_state.runner["events"].get()
+    q = st.session_state.runner["events"]
+    while drained < 2000:
+        try:
+            ev = q.get_nowait()
+        except Exception:
+            break
         drained += 1
 
         # Fortschritt im UI aktualisieren (hier ist Streamlit-Kontext vorhanden)
@@ -372,9 +376,8 @@ with log_box:
             meta = ev.get("meta") or {}
             st.session_state.runner["jobs_done"]  = int(meta.get("done", 0))
             st.session_state.runner["jobs_total"] = int(meta.get("total", 0))
-            # expose for auto-refresh logic as well
-            st.session_state.runner['progress'] = int(meta.get('done', 0))
-            st.session_state.runner['total']    = int(meta.get('total', 0))
+            st.session_state.runner["progress"]   = int(meta.get("done", 0))
+            st.session_state.runner["total"]      = int(meta.get("total", 0))
 
         phase = ev.get("phase", "")
         msg   = ev.get("msg", "")
@@ -413,11 +416,9 @@ if not is_running:
             out_file = expected
         else:
             candidates = []
-            search_dirs = set()
+            search_dirs = {BASE_DIR, "."}
             if expected:
                 search_dirs.add(os.path.dirname(expected))
-            search_dirs.add(BASE_DIR)
-            search_dirs.add(".")
             for d in list(search_dirs):
                 try:
                     for f in os.listdir(d):
@@ -429,10 +430,11 @@ if not is_running:
                 out_file = max(candidates, key=lambda p: os.path.getmtime(p))
     except Exception:
         out_file = None
+
     if out_file and os.path.exists(out_file):
         st.success(f'Fertig: {out_file}')
         with open(out_file, "rb") as fh:
-            st.download_button('📥 Download Excel', data=fh.read(), file_name=os.path.basename(out_file))
+            st.download_button('📥 Download Excel', data=fh.read(), file_name=out_file)
 
         try:
             xls = pd.ExcelFile(out_file)
