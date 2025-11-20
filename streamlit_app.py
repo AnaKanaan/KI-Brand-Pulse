@@ -417,14 +417,12 @@ if not is_running:
                     for f in os.listdir(d):
                         if f.startswith('out_') and f.endswith('.xlsx'):
                             candidates.append(os.path.join(d, f))
-    except FileNotFoundError:
-        continue
-if candidates:
-    out_file = max(candidates, key=lambda p: os.path.getmtime(p))
-
+                except FileNotFoundError:
+            continue
+        if candidates:
+            out_file = max(candidates, key=lambda p: os.path.getmtime(p))
     except Exception:
         pass
-
     if out_file and os.path.exists(out_file):
         st.success(f'Fertig: {out_file}')
         with open(out_file, "rb") as fh:
