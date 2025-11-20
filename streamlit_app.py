@@ -411,8 +411,7 @@ if not is_running:
         if st.session_state.runner.get('expected_xlsx') and os.path.exists(st.session_state.runner['expected_xlsx']):
             out_file = st.session_state.runner['expected_xlsx']
         else:
-            
-candidates = []
+            candidates = []
 for d in {BASE_DIR, '.'}:
     try:
         for f in os.listdir(d):
