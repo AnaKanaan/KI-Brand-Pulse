@@ -254,7 +254,7 @@ def start_worker():
                 topn=int(topn), num_runs=int(num_runs),
                 categories=categories, question_ids=parse_ids(question_ids_raw),
                 comp1=comp1, comp2=comp2, comp3=comp3,
-                temperature_chat_no=float(temp_no), temperature_chat_search=float(temp_auto),
+                temperature_chat_no=0.0, temperature_chat_search=0.0,
                 max_tokens=int(max_tokens), wrapper_mode=wrapper_mode,
                 progress=_progress, cancel_event=cancel_event,
                 debug_level=debug_level, max_questions=int(max_questions),
@@ -376,6 +376,8 @@ with log_box:
             meta = ev.get("meta") or {}
             st.session_state.runner["jobs_done"]  = int(meta.get("done", 0))
             st.session_state.runner["jobs_total"] = int(meta.get("total", 0))
+            st.session_state.runner["progress"]   = int(meta.get("done", 0))
+            st.session_state.runner["total"]      = int(meta.get("total", 0))
             st.session_state.runner["progress"]   = int(meta.get("done", 0))
             st.session_state.runner["total"]      = int(meta.get("total", 0))
 
