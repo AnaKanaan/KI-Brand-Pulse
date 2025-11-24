@@ -1,3 +1,4 @@
+
 # streamlit_app.py
 import os, time, json, threading, queue, pathlib
 import pandas as pd
@@ -86,7 +87,10 @@ with st.expander('API-Keys (nur Session, keine Speicherung)'):
 # =========================================================
 with st.sidebar:
     st.markdown("### Konfiguration")
-    st.caption("**Wrapper-Modi:**\n\n- **free_emulation**: das LLM antwortet frei ohne Zusatzrahmen.\n- **stabilized**: strengere Anweisungen & Formatvorgaben, konsistentere Struktur (z. B. JSON), Quellenhinweise, knappe Antworten.")
+    st.caption("**Wrapper-Modi:**
+
+- **free_emulation**: das LLM antwortet frei ohne Zusatzrahmen.
+- **stabilized**: strengere Anweisungen & Formatvorgaben, konsistentere Struktur (z. B. JSON), Quellenhinweise, knappe Antworten.")
     brand  = st.text_input('Brand', 'DAK')
     topic  = st.text_input('Topic', 'KI im Gesundheitswesen')
     market = st.text_input('Market', 'DE')
@@ -159,7 +163,8 @@ def ui_event_sink(ev: dict):
     if lp:
         try:
             with open(lp, "a", encoding="utf-8") as f:
-                f.write(json.dumps(ev, ensure_ascii=False) + "\n")
+                f.write(json.dumps(ev, ensure_ascii=False) + "
+")
         except Exception:
             pass
 
@@ -235,7 +240,8 @@ def start_worker():
             q.put(ev)
             if log_path:
                 with open(log_path, "a", encoding="utf-8") as f:
-                    f.write(json.dumps(ev, ensure_ascii=False) + "\n")
+                    f.write(json.dumps(ev, ensure_ascii=False) + "
+")
         except Exception:
             pass
 
@@ -403,7 +409,8 @@ with log_box:
         if pe: lines.append(f"    prompt: {pe}")
         if ae: lines.append(f"    answer: {ae}")
 
-        st.code("\n".join(lines))
+        st.code("
+".join(lines))
 
 # =========================================================
 # Ergebnis-Panel: Dynamische Anzeige und Download
@@ -480,8 +487,7 @@ if out_file and os.path.exists(out_file):
 
             st.markdown('### Profile x Language - Inclusion Rate')
             try:
-                inc_pf = norm.assign(incl=norm['inclusion'].astype('boolean').fillna(False)) \
-                             .groupby(['profile','language'])['incl'].mean().reset_index()
+                inc_pf = norm.assign(incl=norm['inclusion'].astype('boolean').fillna(False))                              .groupby(['profile','language'])['incl'].mean().reset_index()
                 inc_pf['incl'] = (inc_pf['incl']*100).round(1)
                 inc_pf = inc_pf.pivot(index='profile', columns='language', values='incl').fillna(0)
                 st.bar_chart(inc_pf)
@@ -490,8 +496,7 @@ if out_file and os.path.exists(out_file):
 
             st.markdown('### Sentiment by Profile')
             try:
-                s_pf = pd.to_numeric(norm['aspect_scores.sentiment'], errors='coerce') \
-                           .groupby(norm['profile']).mean().to_frame('sentiment')
+                s_pf = pd.to_numeric(norm['aspect_scores.sentiment'], errors='coerce')                            .groupby(norm['profile']).mean().to_frame('sentiment')
                 st.bar_chart(s_pf)
             except Exception:
                 pass
@@ -515,7 +520,3 @@ if is_running:
 elif not (out_file and os.path.exists(out_file)):
     st.info('Keys setzen (optional), konfigurieren und **Run** starten.')
 
-with open("streamlit_app.py", "w", encoding="utf-8") as f:
-    f.write(streamlit_app_content)
-
-print("streamlit_app.py content has been updated and saved.")
