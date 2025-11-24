@@ -87,9 +87,7 @@ with st.expander('API-Keys (nur Session, keine Speicherung)'):
 # =========================================================
 with st.sidebar:
     st.markdown("### Konfiguration")
-    st.caption("**Wrapper-Modi:**
-- **free_emulation**: das LLM antwortet frei ohne Zusatzrahmen.
-- **stabilized**: strengere Anweisungen & Formatvorgaben, konsistentere Struktur (z. B. JSON), Quellenhinweise, knappe Antworten.")
+    st.caption("**Wrapper-Modi:** - **free_emulation**: das LLM antwortet frei ohne Zusatzrahmen. - **stabilized**: strengere Anweisungen & Formatvorgaben, konsistentere Struktur (z. B. JSON), Quellenhinweise, knappe Antworten.")
     brand  = st.text_input('Brand', 'DAK')
     topic  = st.text_input('Topic', 'KI im Gesundheitswesen')
     market = st.text_input('Market', 'DE')
