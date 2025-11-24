@@ -514,7 +514,6 @@ if is_running:
     st.info('Lauf aktiv - Logs & Fortschritt siehe oben. Mit **Stop** kannst du den Run abbrechen.')
 elif not (out_file and os.path.exists(out_file)):
     st.info('Keys setzen (optional), konfigurieren und **Run** starten.')
-'''
 
 with open("streamlit_app.py", "w", encoding="utf-8") as f:
     f.write(streamlit_app_content)
