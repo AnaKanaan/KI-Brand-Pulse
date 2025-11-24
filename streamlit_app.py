@@ -160,8 +160,7 @@ def ui_event_sink(ev: dict):
     if lp:
         try:
             with open(lp, "a", encoding="utf-8") as f:
-                f.write(json.dumps(ev, ensure_ascii=False) + "
-")
+                f.write(json.dumps(ev, ensure_ascii=False) + "")
         except Exception:
             pass
 
