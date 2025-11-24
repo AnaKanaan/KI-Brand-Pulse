@@ -1,6 +1,7 @@
 # streamlit_app.py
 import os, time, json, threading, queue, pathlib
 import pandas as pd
+import streamlit as st
 
 # ---- Auto-refresh helper (no external dependency) ----
 def ___AUTOREFRESH___():
@@ -14,41 +15,40 @@ def ___AUTOREFRESH___():
         st.session_state.runner = r
         st.rerun()
 # ------------------------------------------------------
-import streamlit as st
 
 from ki_rep_monitor import run_pipeline
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = os.getcwd() # Corrected: Use os.getcwd() for Colab compatibility
 
 st.set_page_config(page_title='KI-Reputation Monitor', layout='wide')
-st.title('🔎 KI-Reputation Monitor — Final3')
+st.title('KI-Reputation Monitor --- Final3')
 st.markdown(
     """
     <div style='margin: 0.8rem 0; font-size: 1.05rem;'>
-    <strong>„Was erzählt die KI‑Landschaft aktuell über meine Marke / mein Thema – und auf welcher Wissensbasis?“</strong><br>
-    <em>„Wir messen, wie KI‑Assistenten deinen Ruf formen: welche Antworten Nutzer*innen bekommen, welche Quellen dahinterstehen und wie stabil diese Bilder sind.“</em>
+    <strong>"Was erzaehlt die KI-Landschaft aktuell ueber meine Marke / mein Thema - und auf welcher Wissensbasis?"</strong><br>
+    <em>"Wir messen, wie KI-Assistenten deinen Ruf formen: welche Antworten Nutzer*innen bekommen, welche Quellen dahinterstehen und wie stabil diese Bilder sind."</em>
     </div>
     """,
     unsafe_allow_html=True
 )
-with st.expander("ℹ️ Definitionen & Legende", expanded=False):
+with st.expander("i Definitionen & Legende", expanded=False):
     st.markdown("""
-**Profile (konzeptionell)**  
-- **NO_SEARCH** (z. B. `CHATGPT_NO_SEARCH`, `GEMINI_NO_SEARCH`): Antwort ohne Websuche, auf Basis von Modellwissen. *Citations* sind leer (`[]`) bzw. nur aus Modellwissen.  
-- **SEARCH_AUTO** (z. B. `CHATGPT_SEARCH_AUTO`, `GEMINI_SEARCH_AUTO`): LLM führt Suche aus (Google/Browse), extrahiert **Evidence** (Titel, URL, Domain, Datum/Snippet) und begründet Antworten.  
-- **GOOGLE_OVERVIEW**: kompakter Überblick mit Quellenlisten („Top‑Treffer“) für schnelle Orientierung.
+**Profile (konzeptionell)**
+- **NO_SEARCH** (z. B. `CHATGPT_NO_SEARCH`, `GEMINI_NO_SEARCH`): Antwort ohne Websuche, auf Basis von Modellwissen. *Citations* sind leer (`[]`) bzw. nur aus Modellwissen.
+- **SEARCH_AUTO** (z. B. `CHATGPT_SEARCH_AUTO`, `GEMINI_SEARCH_AUTO`): LLM fuehrt Suche aus (Google/Browse), extrahiert **Evidence** (Titel, URL, Domain, Datum/Snippet) und begruendet Antworten.
+- **GOOGLE_OVERVIEW**: kompakter Ueberblick mit Quellenlisten ("Top-Treffer") fuer schnelle Orientierung.
 
-**KPIs & Scores**  
-- **Alter (`age_days`)**: Differenz in Tagen zwischen `published_at` und jetzt.  
-- **Freshness‑Bucket**: `today` / `≤7d` / `≤30d` / `≤90d` / `≤365d` / `>365d`.  
-- **Freshness‑Index**: \\(\\text{avg}\\big(e^{-(\\text{age\\_days}/90)}\\big)\\) über alle Evidenzen (0..1; höher = aktueller).  
-- **Sentiment‑Score**: kontinuierlich in \\([-1, +1]\\).  
-- **Sentiment‑Label**: Schwellen −0.2 / +0.2 ⇒ *negativ* / *neutral* / *positiv*.  
-- **Visibility**: \\([0,1]\\) – „Wie prominent steht die Marke im Antworttext im Fokus?“  
-- **Inclusion**: boolesch – ob die Antwort gemäß Codierung **auf Thema/Marke einzahlt** (Accepted) oder nicht (Rejected).
+**KPIs & Scores**
+- **Alter (age_days)**: Differenz in Tagen zwischen `published_at` und jetzt.
+- **Freshness-Bucket**: `today` / `<=7d` / `<=30d` / `<=90d` / `<=365d` / `>365d`.
+- **Freshness-Index**: avg(e^-(age_days/90)) ueber alle Evidenzen (0..1; hoeher = aktueller).
+- **Sentiment-Score**: kontinuierlich in `[-1, +1]`.
+- **Sentiment-Label**: Schwellen -0.2 / +0.2 => *negativ* / *neutral* / *positiv*.
+- **Visibility**: `[0,1]` - "Wie prominent steht die Marke im Antworttext im Fokus?"
+- **Inclusion**: boolesch - ob die Antwort gemaess Codierung **auf Thema/Marke einzahlt** (Accepted) oder nicht (Rejected).
 
-**Hinweise zur Erhebung**  
-- *Visibility, Sentiment* werden in **Pass B** explizit im Prompt definiert und von der LLM codiert.  
-- *Alter, Freshness* werden **nachträglich** aus den Evidenz‑Feldern berechnet.  
+**Hinweise zur Erhebung**
+- *Visibility, Sentiment* werden in **Pass B** explizit im Prompt definiert und von der LLM codiert.
+- *Alter, Freshness* werden **nachtraeglich** aus den Evidenz-Feldern berechnet.
 - *Inclusion* folgt der Klassifikation (Accepted/Rejected) aus der Codierung.
 """)
 
@@ -69,7 +69,7 @@ if "runner" not in st.session_state:
 # =========================================================
 # API Keys (Session only)
 # =========================================================
-with st.expander('🔐 API-Keys (nur Session, keine Speicherung)'):
+with st.expander('API-Keys (nur Session, keine Speicherung)'):
     openai_key = st.text_input('OpenAI API Key', type='password', placeholder='sk-...')
     google_key = st.text_input('Google API Key', type='password', placeholder='AIza...')
     google_cx  = st.text_input('Google CSE ID (cx)', type='password', placeholder='custom search engine id')
@@ -86,7 +86,7 @@ with st.expander('🔐 API-Keys (nur Session, keine Speicherung)'):
 # =========================================================
 with st.sidebar:
     st.markdown("### Konfiguration")
-    st.caption("**Wrapper‑Modi:**\n\n- **free_emulation**: das LLM antwortet frei ohne Zusatzrahmen.\n- **stabilized**: strengere Anweisungen & Formatvorgaben, konsistentere Struktur (z. B. JSON), Quellenhinweise, knappe Antworten.")
+    st.caption("**Wrapper-Modi:**\n\n- **free_emulation**: das LLM antwortet frei ohne Zusatzrahmen.\n- **stabilized**: strengere Anweisungen & Formatvorgaben, konsistentere Struktur (z. B. JSON), Quellenhinweise, knappe Antworten.")
     brand  = st.text_input('Brand', 'DAK')
     topic  = st.text_input('Topic', 'KI im Gesundheitswesen')
     market = st.text_input('Market', 'DE')
@@ -106,7 +106,7 @@ with st.sidebar:
     # Stakeholder perspective selection.  If none selected a generic perspective is used.
     stakeholders = st.multiselect(
         'Stakeholders',
-        ['generic', 'Bewerber', 'Investor', 'Mitarbeitender', 'Endkonsument', 'Business-Kunde', 'Business-Partner', 'Provider', 'Entscheidungsträger aus Politik und Verwaltung'],
+        ['generic', 'Bewerber', 'Investor', 'Mitarbeitender', 'Endkonsument', 'Business-Kunde', 'Business-Partner', 'Provider', 'Entscheidungstraeger aus Politik und Verwaltung'],
         default=['generic']
     )
 
@@ -121,7 +121,7 @@ with st.sidebar:
     # Temperature controls removed from UI; fixed per policy
     temp_no = 0.0
     temp_auto = 0.0
-    # Increase default token limits for Pass A to accommodate longer responses
+    # Increase default token limits for Pass A to accommodate longer responses
     max_tokens = 4000
     max_tokens_search = 4000
     wrapper_mode = st.selectbox('Pass-A Wrapper', ['free_emulation','stabilized'], index=0)
@@ -135,9 +135,9 @@ with st.sidebar:
     max_questions = st.number_input("Max. Fragen (Testlauf, 0 = alle)", 0, 2000, 0, 10)
 
     st.divider()
-    run_btn  = st.button('🚀 Run')
-    stop_btn = st.button('🛑 Stop')
-    clear_btn= st.button('🧹 Clear Logs')
+    run_btn  = st.button('Run')
+    stop_btn = st.button('Stop')
+    clear_btn= st.button('Clear Logs')
 
 # =========================================================
 # Helpers (UI-Thread)
@@ -164,10 +164,10 @@ def ui_event_sink(ev: dict):
             pass
 
 def eta_text(done: int, total: int, start_t: float) -> str:
-    if done <= 0 or total <= 0: return "–"
+    if done <= 0 or total <= 0: return "-"
     elapsed = max(0.001, time.time() - start_t)
     rate = done / elapsed
-    if rate <= 0: return "–"
+    if rate <= 0: return "-"
     remain = total - done
     sec_left = int(remain / rate)
     return f"{sec_left // 60:02d}:{sec_left % 60:02d}"
@@ -201,7 +201,7 @@ def start_worker():
     try:
         cols = list(pd.read_excel(q_path, sheet_name="Questions").columns)
         st.sidebar.write("Questions sheet columns:", cols)
-        show_preview = st.sidebar.checkbox("Fragen‑Vorschau (bis 5 Zeilen)", value=False)
+        show_preview = st.sidebar.checkbox("Fragen-Vorschau (bis 5 Zeilen)", value=False)
         if show_preview:
             try:
                 df_prev = pd.read_excel(q_path, sheet_name="Questions").head(5)
@@ -254,14 +254,14 @@ def start_worker():
                 topn=int(topn), num_runs=int(num_runs),
                 categories=categories, question_ids=parse_ids(question_ids_raw),
                 comp1=comp1, comp2=comp2, comp3=comp3,
-                temperature_chat_no=0.0, temperature_chat_search=0.0,
+                temperature_chat_no=float(temp_no), temperature_chat_search=float(temp_auto),
                 max_tokens=int(max_tokens), wrapper_mode=wrapper_mode,
                 progress=_progress, cancel_event=cancel_event,
                 debug_level=debug_level, max_questions=int(max_questions),
                 passA_search_tokens=int(max_tokens_search),
                 stakeholders=stakeholders
             )
-            worker_event_sink({"t": time.time(), "phase": "done", "msg": json.dumps(res)})
+            worker_event_sink({"t": time.time(), "phase": "done", "msg": json.dumps(res)}) # This event contains the final result with 'out'
         except Exception as ex:
             worker_event_sink({"t": time.time(), "phase": "error", "msg": str(ex)})
 
@@ -350,16 +350,16 @@ log_path   = st.session_state.runner.get("log_path")
 
 st.divider()
 c1, c2, c3, c4 = st.columns(4)
-with c1: st.markdown("**Status**");      st.write("Läuft…" if is_running else "Idle")
-with c2: st.markdown("**Fortschritt**"); st.write(f"{jobs_done}/{jobs_total}" if jobs_total else "–")
+with c1: st.markdown("**Status**");      st.write("Laeuft..." if is_running else "Idle")
+with c2: st.markdown("**Fortschritt**"); st.write(f"{jobs_done}/{jobs_total}" if jobs_total else "-")
 with c3: st.markdown("**ETA**");         st.write(eta_text(jobs_done, jobs_total, start_t))
 with c4:
     if log_path and os.path.exists(log_path):
-        st.download_button("📥 Debug-Logs (NDJSON)", data=open(log_path,"rb").read(), file_name=os.path.basename(log_path))
+        st.download_button("Download Debug-Logs (NDJSON)", data=open(log_path,"rb").read(), file_name=os.path.basename(log_path))
 
 progress_bar = st.progress(min(1.0, jobs_done / jobs_total) if jobs_total else 0.0)
 
-st.markdown('### 🪵 Debug-Protokoll (live)')
+st.markdown('### Debug-Protokoll (live)')
 log_box = st.container()
 with log_box:
     drained = 0
@@ -378,16 +378,14 @@ with log_box:
             st.session_state.runner["jobs_total"] = int(meta.get("total", 0))
             st.session_state.runner["progress"]   = int(meta.get("done", 0))
             st.session_state.runner["total"]      = int(meta.get("total", 0))
-            st.session_state.runner["progress"]   = int(meta.get("done", 0))
-            st.session_state.runner["total"]      = int(meta.get("total", 0))
 
         phase = ev.get("phase", "")
         msg   = ev.get("msg", "")
         meta  = ev.get("meta") or {}
         tstr  = time.strftime("%H:%M:%S", time.localtime(ev.get("t", time.time())))
-        lines = [f"{tstr} {phase} — {msg}"]
+        lines = [f"{tstr} {phase} --- {msg}"]
 
-        # Quellen hübsch anzeigen
+        # Quellen huebsch anzeigen
         cits = meta.get("citations") or []
         if cits:
             lines.append("    Quellen:")
@@ -397,9 +395,9 @@ with log_box:
                 sn  = (c.get("snippet") or "").strip()
                 url = c.get("url", "")
                 if sn:
-                    lines.append(f"      {j}. {tit} ({dom}) – {sn} – {url}")
+                    lines.append(f"      {j}. {tit} ({dom}) --- {sn} --- {url}")
                 else:
-                    lines.append(f"      {j}. {tit} ({dom}) – {url}")
+                    lines.append(f"      {j}. {tit} ({dom}) --- {url}")
 
         pe = meta.get("prompt_excerpt"); ae = meta.get("answer_excerpt")
         if pe: lines.append(f"    prompt: {pe}")
@@ -408,124 +406,117 @@ with log_box:
         st.code("\n".join(lines))
 
 # =========================================================
-# Ergebnis-Panel wenn fertig
+# Ergebnis-Panel: Dynamische Anzeige und Download
 # =========================================================
-if not is_running:
-    out_file = None
+# Determine the output file path outside the `if not is_running` block
+out_file = st.session_state.runner.get('expected_xlsx')
+
+if out_file and os.path.exists(out_file):
+    st.success(f'Aktueller Report: {out_file} (wird live aktualisiert)')
+    with open(out_file, "rb") as fh:
+        st.download_button('Download Excel (aktuell)', data=fh.read(), file_name=os.path.basename(out_file))
+
     try:
-        expected = st.session_state.runner.get('expected_xlsx')
-        if expected and os.path.exists(expected):
-            out_file = expected
-        else:
-            candidates = []
-            search_dirs = {BASE_DIR, "."}
-            if expected:
-                search_dirs.add(os.path.dirname(expected))
-            for d in list(search_dirs):
-                try:
-                    for f in os.listdir(d):
-                        if f.startswith("out_") and f.endswith(".xlsx"):
-                            candidates.append(os.path.join(d, f))
-                except FileNotFoundError:
-                    continue
-            if candidates:
-                out_file = max(candidates, key=lambda p: os.path.getmtime(p))
-    except Exception:
-        out_file = None
+        # Always try to load and display data if the file exists
+        xls = pd.ExcelFile(out_file)
+        runs = pd.read_excel(xls, 'Runs') if "Runs" in xls.sheet_names else pd.DataFrame()
+        norm = pd.read_excel(xls, 'Normalized') if "Normalized" in xls.sheet_names else pd.DataFrame()
+        evid = pd.read_excel(xls, 'Evidence') if "Evidence" in xls.sheet_names else pd.DataFrame()
+        cfg  = pd.read_excel(xls, 'Config') if "Config" in xls.sheet_names else pd.DataFrame()
+        raw  = pd.read_excel(xls, 'RawAnswers') if "RawAnswers" in xls.sheet_names else pd.DataFrame()
+        stab = pd.read_excel(xls, 'Stability_Metrics') if "Stability_Metrics" in xls.sheet_names else pd.DataFrame()
 
-    if out_file and os.path.exists(out_file):
-        st.success(f'Fertig: {out_file}')
-        with open(out_file, "rb") as fh:
-            st.download_button('📥 Download Excel', data=fh.read(), file_name=out_file)
+        # Display KPIs only if Normalized data is available
+        if not norm.empty:
+            st.subheader('KPIs')
+            col1, col2, col3, col4, col5, col6 = st.columns(6)
 
-        try:
-            xls = pd.ExcelFile(out_file)
-            runs = pd.read_excel(xls, 'Runs') if "Runs" in xls.sheet_names else pd.DataFrame()
-            norm = pd.read_excel(xls, 'Normalized') if "Normalized" in xls.sheet_names else pd.DataFrame()
-            evid = pd.read_excel(xls, 'Evidence') if "Evidence" in xls.sheet_names else pd.DataFrame()
-            cfg  = pd.read_excel(xls, 'Config') if "Config" in xls.sheet_names else pd.DataFrame()
-            raw  = pd.read_excel(xls, 'RawAnswers') if "RawAnswers" in xls.sheet_names else pd.DataFrame()
-        except Exception as ex:
-            st.error(f"Excel lesen fehlgeschlagen: {ex}")
-            runs = norm = evid = cfg = raw = pd.DataFrame()
+            def _bool_mean(series: pd.Series) -> float:
+                if series is None or series.empty: return 0.0
+                s = series.astype('boolean').fillna(False)
+                return float(s.mean())
 
-        st.subheader('📊 KPIs')
-        col1, col2, col3, col4, col5, col6 = st.columns(6)
+            def _num_mean(series: pd.Series) -> float:
+                if series is None or series.empty: return 0.0
+                return pd.to_numeric(series, errors='coerce').fillna(0).mean()
 
-        # robust gegen pandas 3.0
-        def _bool_mean(series: pd.Series) -> float:
-            if series is None or series.empty: return 0.0
-            s = series.astype('boolean').fillna(False)
-            return float(s.mean())
+            inc   = _bool_mean(norm.get('inclusion', pd.Series(dtype='boolean')))
+            sent  = _num_mean(norm.get('aspect_scores.sentiment', pd.Series(dtype='float')))
+            fresh = _num_mean(norm.get('freshness_index', pd.Series(dtype='float')))
 
-        def _num_mean(series: pd.Series) -> float:
-            if series is None or series.empty: return 0.0
-            return pd.to_numeric(series, errors='coerce').fillna(0).mean()
+            evid_by_run = (evid.groupby('run_id').size() if not evid.empty else pd.Series(dtype=int))
+            ev_rate = (evid_by_run.gt(0).mean() if not evid_by_run.empty else 0.0)
+            dom_div = int(evid['domain'].nunique()) if not evid.empty and 'domain' in evid.columns else 0
 
-        inc   = _bool_mean(norm.get('inclusion', pd.Series(dtype='boolean')))
-        sent  = _num_mean(norm.get('aspect_scores.sentiment', pd.Series(dtype='float')))
-        fresh = _num_mean(norm.get('freshness_index', pd.Series(dtype='float')))
+            lbl_col = norm.get('sentiment_label', pd.Series(dtype='object'))
+            lbl_counts = lbl_col.value_counts() if not lbl_col.empty else pd.Series(dtype='int')
+            pos_share  = (float(lbl_counts.get('positive', 0)) / max(int(lbl_counts.sum()), 1)) if not lbl_counts.empty else 0.0
 
-        evid_by_run = (evid.groupby('run_id').size() if not evid.empty else pd.Series(dtype=int))
-        ev_rate = (evid_by_run.gt(0).mean() if not evid_by_run.empty else 0.0)
-        dom_div = int(evid['domain'].nunique()) if not evid.empty and 'domain' in evid.columns else 0
+            col1.metric('Inclusion Rate', f'{inc*100:.1f}%')
+            col2.metric('Sentiment Avg', f'{sent:+.2f}')
+            col3.metric('Freshness Index', f'{fresh:.2f}')
+            col4.metric('% Runs mit Belegen', f'{ev_rate*100:.1f}%')
+            col5.metric('Domain-Diversitaet', f'{dom_div}')
+            col6.metric('Positiv-Label Anteil', f'{pos_share*100:.1f}%')
 
-        lbl_col = norm.get('sentiment_label', pd.Series(dtype='object'))
-        lbl_counts = lbl_col.value_counts() if not lbl_col.empty else pd.Series(dtype='int')
-        pos_share  = (float(lbl_counts.get('positive', 0)) / max(int(lbl_counts.sum()), 1)) if not lbl_counts.empty else 0.0
+            c1, c2 = st.columns(2)
+            with c1:
+                st.markdown('**Domain Types**')
+                if not evid.empty and 'domain_type' in evid.columns:
+                    dtc = evid['domain_type'].value_counts().reset_index()
+                    dtc.columns = ['domain_type','count']
+                    st.bar_chart(dtc.set_index('domain_type'))
+                else:
+                    st.info('Keine Evidence-Daten.')
+            with c2:
+                st.markdown('**Freshness Buckets**')
+                if not evid.empty and 'freshness_bucket' in evid.columns:
+                    order = ['today','<=7d','<=30d','<=90d','<=365d','>365d','unknown']
+                    fb = evid['freshness_bucket'].value_counts().reindex(order).fillna(0).reset_index()
+                    fb.columns = ['bucket','count']
+                    st.bar_chart(fb.set_index('bucket'))
+                else:
+                    st.info('Keine Evidence-Daten.')
 
-        col1.metric('Inclusion Rate', f'{inc*100:.1f}%')
-        col2.metric('Sentiment Ø', f'{sent:+.2f}')
-        col3.metric('Freshness Index', f'{fresh:.2f}')
-        col4.metric('% Runs mit Belegen', f'{ev_rate*100:.1f}%')
-        col5.metric('Domain-Diversität', f'{dom_div}')
-        col6.metric('Positiv-Label Anteil', f'{pos_share*100:.1f}%')
+            st.markdown('### Profile x Language - Inclusion Rate')
+            try:
+                inc_pf = norm.assign(incl=norm['inclusion'].astype('boolean').fillna(False)) \
+                             .groupby(['profile','language'])['incl'].mean().reset_index()
+                inc_pf['incl'] = (inc_pf['incl']*100).round(1)
+                inc_pf = inc_pf.pivot(index='profile', columns='language', values='incl').fillna(0)
+                st.bar_chart(inc_pf)
+            except Exception:
+                st.info('Nicht genug Daten fuer ProfilexLanguage.')
 
-        c1, c2 = st.columns(2)
-        with c1:
-            st.markdown('**Domain Types**')
-            if not evid.empty and 'domain_type' in evid.columns:
-                dtc = evid['domain_type'].value_counts().reset_index()
-                dtc.columns = ['domain_type','count']
-                st.bar_chart(dtc.set_index('domain_type'))
-            else:
-                st.info('Keine Evidence-Daten.')
-        with c2:
-            st.markdown('**Freshness Buckets**')
-            if not evid.empty and 'freshness_bucket' in evid.columns:
-                order = ['today','≤7d','≤30d','≤90d','≤365d','>365d','unknown']
-                fb = evid['freshness_bucket'].value_counts().reindex(order).fillna(0).reset_index()
-                fb.columns = ['bucket','count']
-                st.bar_chart(fb.set_index('bucket'))
-            else:
-                st.info('Keine Evidence-Daten.')
-
-        st.markdown('### Profile × Language — Inclusion Rate')
-        try:
-            inc_pf = norm.assign(incl=norm['inclusion'].astype('boolean').fillna(False)) \
-                         .groupby(['profile','language'])['incl'].mean().reset_index()
-            inc_pf['incl'] = (inc_pf['incl']*100).round(1)
-            inc_pf = inc_pf.pivot(index='profile', columns='language', values='incl').fillna(0)
-            st.bar_chart(inc_pf)
-        except Exception:
-            st.info('Nicht genug Daten für Profile×Language.')
-
-        st.markdown('### Sentiment by Profile')
-        try:
-            s_pf = pd.to_numeric(norm['aspect_scores.sentiment'], errors='coerce') \
-                       .groupby(norm['profile']).mean().to_frame('sentiment')
-            st.bar_chart(s_pf)
-        except Exception:
-            pass
+            st.markdown('### Sentiment by Profile')
+            try:
+                s_pf = pd.to_numeric(norm['aspect_scores.sentiment'], errors='coerce') \
+                           .groupby(norm['profile']).mean().to_frame('sentiment')
+                st.bar_chart(s_pf)
+            except Exception:
+                pass
 
         st.subheader('Runs'); st.dataframe(runs, use_container_width=True, hide_index=True)
         st.subheader('Evidence'); st.dataframe(evid, use_container_width=True, hide_index=True)
         st.subheader('Normalized (flattened JSON)'); st.dataframe(norm, use_container_width=True, hide_index=True)
         if not raw.empty:
             st.subheader('Raw Answers (Pass A)'); st.dataframe(raw, use_container_width=True, hide_index=True)
-        st.subheader('Config'); 
+        st.subheader('Config');
         if not cfg.empty: st.table(cfg)
-    else:
-        st.info('Keys setzen (optional), konfigurieren und **Run** starten.')
-else:
-    st.info('Lauf aktiv — Logs & Fortschritt siehe oben. Mit **Stop** kannst du den Run abbrechen.')
+        if not stab.empty:
+            st.subheader('Stability Metrics'); st.dataframe(stab, use_container_width=True, hide_index=True)
+
+    except Exception as ex:
+        st.error(f"Excel lesen fehlgeschlagen: {ex}")
+
+# Display informational messages about run status
+if is_running:
+    st.info('Lauf aktiv - Logs & Fortschritt siehe oben. Mit **Stop** kannst du den Run abbrechen.')
+elif not (out_file and os.path.exists(out_file)):
+    st.info('Keys setzen (optional), konfigurieren und **Run** starten.')
+'''
+
+with open("streamlit_app.py", "w", encoding="utf-8") as f:
+    f.write(streamlit_app_content)
+
+print("streamlit_app.py content has been updated and saved.")
