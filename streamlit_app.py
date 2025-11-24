@@ -404,8 +404,7 @@ with log_box:
         if pe: lines.append(f"    prompt: {pe}")
         if ae: lines.append(f"    answer: {ae}")
 
-        st.code("
-".join(lines))
+        st.code("".join(lines))
 
 # =========================================================
 # Ergebnis-Panel: Dynamische Anzeige und Download
