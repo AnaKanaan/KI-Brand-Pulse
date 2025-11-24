@@ -5,7 +5,6 @@ from typing import List, Dict, Any, Optional, Callable, Set
 
 import pandas as pd
 import requests
-!pip install tldextract --quiet
 import tldextract
 BASE_DIR = os.getcwd()
 
