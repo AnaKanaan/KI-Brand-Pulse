@@ -5,36 +5,37 @@ from typing import List, Dict, Any, Optional, Callable, Set
 
 import pandas as pd
 import requests
+!pip install tldextract --quiet
 import tldextract
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = os.getcwd()
 
 # =========================================================
 # Modelle / Endpunkte
 # =========================================================
 OPENAI_BASE = os.getenv("OPENAI_API_URL", os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"))
 
-# Pass‑A (Antwort) Modell
+# Pass-A (Antwort) Modell
 #
-# ChatGPT free now uses the GPT‑5.1 Instant model under the hood.  According to
-# the latest OpenAI release notes, GPT‑5.1 Instant is exposed in the API as
-# ``gpt-5.1-chat-latest`` while the deeper reasoning variant (GPT‑5.1
-# Thinking) is exposed as ``gpt-5.1``【677344943524217†L566-L569】.  We default to
+# ChatGPT free now uses the GPT-5.1 Instant model under the hood.  According to
+# the latest OpenAI release notes, GPT-5.1 Instant is exposed in the API as
+# ``gpt-5.1-chat-latest`` while the deeper reasoning variant (GPT-5.1
+# Thinking) is exposed as ``gpt-5.1``.  We default to
 # the Instant variant here to approximate the free ChatGPT experience.  This
 # value can be overridden via the ``MODEL_CHAT`` environment variable.
 MODEL_CHAT  = os.getenv("MODEL_CHAT", "gpt-5.1-chat-latest")
 
-# Pass‑B (Codierung) Modell
+# Pass-B (Codierung) Modell
 #
-# For normalisation we use GPT‑5.1 (Thinking) by default.  This model offers
+# For normalisation we use GPT-5.1 (Thinking) by default.  This model offers
 # deeper reasoning and supports JSON mode.  It can be overridden via
 # ``MODEL_PASS_B``.
 MODEL_PASSB = os.getenv("MODEL_PASS_B", "gpt-5.1")
 
 # Gemini
-# The free Gemini chat experience uses the 2.5 Flash model.  According to
+# The free Gemini chat experience uses the 2.5 Flash model.  According to
 # publicly available comparisons of Gemini and ChatGPT, the free plan gives
-# "general access" to Gemini 2.5 Flash while only limited access to Gemini 2.5 Pro is
-# available【416161300090141†L360-L365】.  We set this as the default model for
+# "general access" to Gemini 2.5 Flash while only limited access to Gemini 2.5 Pro is
+# available.  We set this as the default model for
 # generative calls below.  This can be overridden via the environment
 # variable GEMINI_MODEL.
 DEFAULT_GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
@@ -66,10 +67,10 @@ def normalize_domain(d: str) -> str:
 def freshness_bucket(age_days: Optional[int]) -> str:
     if age_days is None: return "unknown"
     if age_days <= 0:    return "today"
-    if age_days <= 7:    return "≤7d"
-    if age_days <= 30:   return "≤30d"
-    if age_days <= 90:   return "≤90d"
-    if age_days <= 365:  return "≤365d"
+    if age_days <= 7:    return "<=7d"
+    if age_days <= 30:   return "<=30d"
+    if age_days <= 90:   return "<=90d"
+    if age_days <= 365:  return "<=365d"
     return ">365d"
 
 
@@ -138,7 +139,7 @@ def gemini_generate_text(prompt: str, system: Optional[str] = None, model: Optio
     Generate text using the Gemini API.  The Gemini API key is required and
     obtained from the environment variable ``GEMINI_API_KEY``.  If no key is
     set this function raises a RuntimeError.  The default model is
-    ``gemini-2.5-flash`` because the free Gemini chat uses that model【416161300090141†L360-L365】.
+    ``gemini-2.5-flash`` because the free Gemini chat uses that model.
 
     Args:
         prompt: The user prompt to send to the model.
@@ -266,7 +267,7 @@ def extract_domains_from_text(text: str) -> List[Dict[str, Any]]:
     such as (example.com) or mention full URLs.  This helper extracts domain
     names from any parentheses or word-like patterns containing a dot.  It
     returns a list of evidence dictionaries with the domain and a snippet
-    extracted around the domain occurrence.  Duplicate domains are de‑duped.
+    extracted around the domain occurrence.  Duplicate domains are de-duped.
 
     Args:
         text: The plain answer text returned from a language model.
@@ -279,7 +280,7 @@ def extract_domains_from_text(text: str) -> List[Dict[str, Any]]:
     if not text:
         return evid
     # find patterns like (example.com) and raw domain names separated by spaces
-    pattern = re.compile(r"\(([^\)\s]+\.[a-zA-Z]{2,})\)|\b([A-Za-z0-9.-]+\.[A-Za-z]{2,})\b")
+    pattern = re.compile(r"\\(([^\[\\s\]]+\\.[a-zA-Z]{2,})\\)|\\b([A-Za-z0-9.-]+\\.[a-zA-Z]{2,})\\b")
     seen = set()
     for m in pattern.finditer(text):
         domain = None
@@ -293,7 +294,7 @@ def extract_domains_from_text(text: str) -> List[Dict[str, Any]]:
         if not dom_norm or dom_norm in seen:
             continue
         seen.add(dom_norm)
-        # capture snippet around the domain (±60 characters)
+        # capture snippet around the domain (\u00b160 characters)
         start, end = m.span()
         snippet_start = max(0, start - 60)
         snippet_end   = min(len(text), end + 60)
@@ -312,7 +313,7 @@ def extract_publication_date(url: str) -> Optional[str]:
     Attempt to extract the publication date from a web page.  Many news and
     article pages embed a publication date in meta tags (e.g.
     `article:published_time`, `og:published_time`, or `datePublished`).  If no
-    suitable meta tag is found, a generic YYYY‑MM‑DD pattern is searched in
+    suitable meta tag is found, a generic YYYY-MM-DD pattern is searched in
     the HTML.  The returned value is an ISO 8601 timestamp string (UTC) or
     None if no date could be extracted.
 
@@ -347,7 +348,7 @@ def extract_publication_date(url: str) -> Optional[str]:
             except Exception:
                 pass
         # fallback: search for a date pattern (YYYY-MM-DD)
-        date_pattern = re.compile(r'(\d{4}[-/.]\d{1,2}[-/.]\d{1,2})')
+        date_pattern = re.compile(r'(\\d{4}[-/.]\\d{1,2}[-/.]\\d{1,2})')
         m = date_pattern.search(html)
         if m:
             ds = m.group(1).replace('/', '-').replace('.', '-')
@@ -366,7 +367,7 @@ def response_status(data: Dict[str, Any]) -> str:
         return "unknown"
 
 # =========================================================
-# Suche & Prompting
+# Suche / Prompting
 # =========================================================
 def cse_list(q: str, lang: str, market: str, num: int = 5) -> List[Dict[str, Any]]:
     key = require_env_runtime("GOOGLE_API_KEY")
@@ -390,12 +391,12 @@ def cse_list(q: str, lang: str, market: str, num: int = 5) -> List[Dict[str, Any
     return out
 
 def overview_substitute_with_openai(query: str, cse_items: List[Dict[str, Any]], lang: str,
-                                    temperature: float = 0.2, max_tokens: int = 900) -> str:
-    sys = f"Antworte in {lang}. Nutze ausschließlich die bereitgestellten Treffer. Zitiere Domains in Klammern, z. B. (nzz.ch)."
+                                    temperature: float = 0.2, max_tokens: int = 5000) -> str:
+    sys = f"Antworte in {lang}. Nutze ausschlie\\u00df\\u00fclich die bereitgestellten Treffer. Zitiere Domains in Klammern, z. B. (nzz.ch)."
     lines = ["Frage:", query, "", "Treffer:"]
     for i, it in enumerate(cse_items, 1):
         domain = it.get("displayLink") or normalize_domain(it.get("link", ""))
-        lines.append(f"{i}) {it.get('title','')} — {it.get('link','')} — {domain} — {it.get('snippet','')}")
+        lines.append(f"{i}) {it.get('title','')}\\u2014 {it.get('link','')}\\u2014 {domain}\\u2014 {it.get('snippet','')}")
     user = "\n".join(lines)
     # Note: omit ``temperature`` for models that do not support it (e.g. web search).
     data = openai_responses({
@@ -406,12 +407,12 @@ def overview_substitute_with_openai(query: str, cse_items: List[Dict[str, Any]],
     return extract_text_from_responses(data)
 
 def overview_substitute(query: str, cse_items: List[Dict[str, Any]], lang: str,
-                        temperature: float = 0.2, max_tokens: int = 900) -> str:
+                        temperature: float = 0.2, max_tokens: int = 5000) -> str:
     combined = []
     for i, it in enumerate(cse_items, 1):
         domain = it.get("displayLink") or normalize_domain(it.get("link", ""))
-        combined.append(f"{i}) {it.get('title','')} — {it.get('link','')} — {domain} — {it.get('snippet','')}")
-    sys = f"Antworte in {lang}. Nutze ausschließlich die bereitgestellten Treffer. Zitiere Domains in Klammern."
+        combined.append(f"{i}) {it.get('title','')}\\u2014 {it.get('link','')}\\u2014 {domain}\\u2014 {it.get('snippet','')}")
+    sys = f"Antworte in {lang}. Nutze ausschlie\\u00df\\u00fclich die bereitgestellten Treffer. Zitiere Domains in Klammern."
     body = f"{sys}\n\nFrage:\n{query}\n\nTreffer:\n" + "\n".join(combined)
     if os.getenv("GEMINI_API_KEY"):
         txt = gemini_generate_text(prompt=body)
@@ -427,9 +428,9 @@ def render_cse_items_for_coder(items: List[Dict[str, Any]]) -> str:
         title  = e.get("title", "")
         snip   = (e.get("snippet") or "").strip()
         if snip:
-            lines.append(f"{i}) {title} — {url} — {domain} — {snip}")
+            lines.append(f"{i}) {title} \u2014 {url} \u2014 {domain} \u2014 {snip}")
         else:
-            lines.append(f"{i}) {title} — {url} — {domain}")
+            lines.append(f"{i}) {title} \u2014 {url} \u2014 {domain}")
     return "\n".join(lines) if lines else "(keine)"
 
 # =========================================================
@@ -440,10 +441,10 @@ def load_coder_prompts(path: str) -> Dict[str, Any]:
         return json.load(f)
 
 def pass_b_normalize(system_prompt: str, user_prompt: str, model: Optional[str] = None, max_tokens: int = 5000) -> Dict[str, Any]:
-    """Run Pass‑B normalisation in JSON mode and attach the raw API response.
+    """Run Pass-B normalisation in JSON mode and attach the raw API response.
 
     The model is invoked via the Responses API with ``text.format.type =
-    'json_object'`` so that it returns a single JSON object.  In addition to
+    'json_object'`` so that it retains a single JSON object.  In addition to
     parsing the JSON payload, this helper stores the complete raw API
     response under ``run_meta.raw_pass_b`` so that it is available in the
     Normalized sheet for later inspection.
@@ -470,7 +471,7 @@ def pass_b_normalize(system_prompt: str, user_prompt: str, model: Optional[str] 
         # tolerate Markdown fenced JSON blocks
         txt2 = re.sub(r"^```json|^```|```$", "", txt, flags=re.M).strip()
         obj = json.loads(txt2)
-    # Attach the raw Pass‑B response for full transparency.
+    # Attach the raw Pass-B response for full transparency.
     try:
         run_meta = obj.setdefault("run_meta", {})
         run_meta["raw_pass_b"] = data
@@ -483,11 +484,12 @@ def pass_b_normalize(system_prompt: str, user_prompt: str, model: Optional[str] 
 # Evidence Enrichment
 # =========================================================
 def enrich_evidence(evidence: List[Dict[str, Any]], domain_seed_csv: str) -> List[Dict[str, Any]]:
-    """Enrich evidence items with domain type, dates and freshness.
+    """
+    Enrich evidence items with domain type, dates and freshness.
 
-    Pass‑B is expected to already classify each source into a domain type
-    (e.g. ``CORPORATE``, ``NEWS_MEDIA``).  If a model‑assigned
-    ``domain_type``/``domain_type_code`` is present it is used as‑is.
+    Pass-B is expected to already classify each source into a domain type
+    (e.g. ``CORPORATE``, ``NEWS_MEDIA``).  If a model-assigned
+    ``domain_type``/``domain_type_code`` is present it is used as-is.
     Otherwise a fallback classification based on ``domain_type_seed.csv`` is
     applied.  Publication dates are taken from the evidence object when
     present or, as a fallback, extracted from the URL.
@@ -509,11 +511,11 @@ def enrich_evidence(evidence: List[Dict[str, Any]], domain_seed_csv: str) -> Lis
         if dt_seed:
             rules.append((dt_seed, tlds, kws))
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     out: List[Dict[str, Any]] = []
     for e in evidence:
         domain = normalize_domain(e.get("domain") or e.get("url") or "")
-        # 1) Prefer explicit domain type from the model (Pass‑B)
+        # 1) Prefer explicit domain type from the model (Pass-B)
         dt = (str(e.get("domain_type")) or str(e.get("domain_type_code")) or "").strip()
         # 2) Fallback to seed mappings when the model did not decide
         if not dt and domain:
@@ -592,12 +594,12 @@ def _canonize_questions_df(q: pd.DataFrame) -> pd.DataFrame:
 # =========================================================
 # Pass A Helper
 # =========================================================
-def call_chat_no_search(prompt: str, temperature: float = 0.5, max_tokens: int = 900):
+def call_chat_no_search(prompt: str, temperature: float = 0.5, max_tokens: int = 4000):
     """
     Call the ChatGPT model without explicit web search.  When using the
     Responses API, omitting the ``web_search`` tool allows the model to decide
     whether to use its internal knowledge or perform lightweight retrieval.  We
-    request the GPT‑5.1 Instant model (``MODEL_CHAT``) and return the answer
+    request the GPT-5.1 Instant model (``MODEL_CHAT``) and return the answer
     text along with raw metadata.
 
     Args:
@@ -611,9 +613,6 @@ def call_chat_no_search(prompt: str, temperature: float = 0.5, max_tokens: int =
     """
     payload = {
         "model": MODEL_CHAT,
-        # pass the prompt directly; the Responses API accepts either a string
-        # or a list of messages for ``input``.  A single string is sufficient
-        # for one-shot interactions.
         "input": prompt,
         "max_output_tokens": int(max_tokens)
     }
@@ -630,17 +629,17 @@ def call_chat_search_auto(prompt: str,
     ChatGPT search auto profile using the Responses API web search tool.
 
     This function invokes the ``web_search`` tool provided by the Responses API
-    to perform real‑time web search and returns an answer with citations.  The
-    model used is GPT‑5.1 Instant (``MODEL_CHAT``) which aligns with the
-    current ChatGPT free experience【677344943524217†L566-L569】.  Starting
-    November 2025, ChatGPT’s default backend is GPT‑5.1 and it exposes the
+    to perform real-time web search and returns an answer with citations.  The
+    model used is GPT-5.1 Instant (``MODEL_CHAT``) which aligns with the
+    current ChatGPT free experience.  Starting
+    November 2025, ChatGPT\u2019s default backend is GPT-5.1 and it exposes the
     search tool via the Responses API.  You do not need to use the old
     `web_search_preview` tool from the Chat Completions API.  The
     ``search_context_size`` parameter controls how many search results the
-    tool will consider—"low", "medium" (default) or "high"—as documented in
-    the AI Engineer guide【486089801306640†L48-L60】.  The optional
+    tool will consider\u2014"low", "medium" (default) or "high"\u2014as documented in
+    the AI Engineer guide.  The optional
     ``user_location`` can be used to localise search results (see docs)
-    【486089801306640†L29-L37】.
+    .
 
     Args:
         prompt: Question string for ChatGPT.
@@ -648,7 +647,7 @@ def call_chat_search_auto(prompt: str,
         max_tokens: Output token limit.
         search_context_size: Level of search context (``low``, ``medium``, or
             ``high``).  Higher values yield more comprehensive results but are
-            slower and costlier【486089801306640†L48-L60】.
+            slower and costlier.
         user_location: Optional dictionary specifying approximate location for
             search results (e.g. ``{"type":"approximate", "country":"DE"}``).
 
@@ -664,8 +663,8 @@ def call_chat_search_auto(prompt: str,
         tool_def["user_location"] = user_location
 
     # Note: the Responses API interprets ``max_output_tokens`` relative to the
-    # selected model.  GPT‑5.1 supports up to ~4 000 output tokens in most
-    # configurations.  We default to 4 000 here to accommodate long answers
+    # selected model.  GPT-5.1 supports up to ~4\u2013000 output tokens in most
+    # configurations.  We default to 4\u2013000 here to accommodate long answers
     # without repeatedly truncating responses.  Adjust via the function
     # parameter if needed.
     # Build the request payload.  Note that the web search models do not
@@ -688,7 +687,7 @@ def call_chat_search_auto(prompt: str,
 def call_gemini_no_search(prompt: str, temperature: float = 0.2, max_tokens: int = 4000):
     """
     Request a response from the Gemini API without web search.  The free
-    Gemini chat uses the 2.5 Flash model【416161300090141†L360-L365】; this function
+    Gemini chat uses the 2.5 Flash model; this function
     delegates to :func:`gemini_generate_text`.  It returns the answer text
     together with metadata.
     """
@@ -701,10 +700,10 @@ def call_gemini_no_search(prompt: str, temperature: float = 0.2, max_tokens: int
 def call_gemini_search_auto(prompt: str, lang: str, market: str = "", topn: int = 5,
                              temperature: float = 0.2, max_tokens: int = 4000):
     """
-    Query the Gemini API with the built‑in ``google_search`` tool.
+    Query the Gemini API with the built-in ``google_search`` tool.
 
     The Gemini API offers a native `google_search` tool that grounds responses
-    using real‑time web data【832087404409424†L220-L260】.  This function calls
+    using real-time web data.  This function calls
     ``generateContent`` on the configured Gemini model with the search tool
     enabled.  It then extracts the answer text and evidence (citations) from
     the `groundingMetadata` structure returned by the API.  Unlike earlier
@@ -784,7 +783,6 @@ def call_gemini_search_auto(prompt: str, lang: str, market: str = "", topn: int 
 # Hauptpipeline
 # =========================================================
 
-
 def load_stakeholder_lib(path: str) -> Dict[str, Any]:
     lib = {"map": {}, "langs": {}}
     try:
@@ -830,7 +828,7 @@ def run_pipeline(
     comp1: str = "", comp2: str = "", comp3: str = "",
     temperature_chat_no: float = 0.5,
     temperature_chat_search: float = 0.25,
-    max_tokens: int = 900,
+    max_tokens: int = 4000,
     wrapper_mode: str = 'free_emulation',
     progress: Optional[Callable[[Dict[str, Any]], None]] = None,
     cancel_event: Optional["threading.Event"] = None,
@@ -959,19 +957,19 @@ def run_pipeline(
                             raw_text, meta_a = call_chat_no_search(Q, temperature=temperature_chat_no, max_tokens=max_tokens)
                         elif profile == "CHATGPT_SEARCH_AUTO":
                             dbg("api_call_1_request", "LLM (search auto) Anfrage")
-                            # When performing auto‑search we use a larger token limit.
+                            # When performing auto-search we use a larger token limit.
                             # If ``passA_search_tokens`` is provided we respect it,
                             # otherwise we reuse the ``max_tokens`` parameter (which
                             # defaults to 900 but can be increased via the UI).  We no
                             # longer force a minimum of 1200 tokens because the
-                            # default values in the UI are now set to 4 000 to
+                            # default values in the UI are now set to 4\u2013000 to
                             # accommodate longer responses.
                             mtoks = int(passA_search_tokens or max_tokens)
                             # set approximate user location based on the market for better localisation
                             user_loc = None
                             if market:
                                 user_loc = {"type": "approximate", "country": market}
-                            raw_text, meta_a = call_gemini_search_auto(
+                            raw_text, meta_a = call_chat_search_auto(
                                 Q,
                                 temperature=temperature_chat_search,
                                 max_tokens=mtoks,
@@ -1003,14 +1001,14 @@ def run_pipeline(
                             model_version = "overview-substitute"
                         elif profile == "GEMINI_NO_SEARCH":
                         # use Gemini wrapper
-                            dbg("api_call_1_request", "Gemini (no search) Anfrage")
+                            dbg("api_call_1_request", "LLM (no search) Anfrage")
                             raw_text, meta_g = call_gemini_no_search(Q, temperature=0.2, max_tokens=max_tokens)
                             meta_a = meta_g
                             provider = "gemini"
                             model_version = DEFAULT_GEMINI_MODEL
                         elif profile == "GEMINI_SEARCH_AUTO":
                         # use Gemini search wrapper
-                            dbg("api_call_1_request", "Gemini (search auto) Anfrage")
+                            dbg("api_call_1_request", "LLM (search auto) Anfrage")
                             mtoks = int(passA_search_tokens or max(max_tokens, 4000))
                             raw_text, meta_g = call_gemini_search_auto(Q, lang=lang, market=market, topn=topn,
                                                                        temperature=0.2, max_tokens=mtoks)
@@ -1033,7 +1031,7 @@ def run_pipeline(
                         dbg("api_call_1_response",
                             "Pass A Antwort" if meta_a.get("status") == "completed" else "Fehler in Pass A",
                             meta={"status": meta_a.get("status"), "answer_excerpt": ans_excerpt})
-                    
+
                     except Exception as ex:
                         raw_text = f"[ERROR Pass A: {ex}]"
                         meta_a = {"status": "error", "error": str(ex)}
@@ -1115,7 +1113,7 @@ def run_pipeline(
                     # ---------- Meta and Row Assembly ----------
                     obj["brand"] = brand
                     obj["topic"] = topic
-                    obj["market"] = market
+                    obj["market"] = market # Corrected line
                     obj["language"] = lang
                     obj["profile"] = profile
                     obj["intent"] = intent
@@ -1154,6 +1152,37 @@ def run_pipeline(
 
                     done_jobs += 1
                     dbg("progress", f"{done_jobs}/{total_jobs} erledigt", meta={"done": done_jobs, "total": total_jobs})
+
+                    # --- Incremental Export --- Start
+                    df_runs = pd.DataFrame(runs_rows)
+                    df_norm = pd.json_normalize(norm_rows, max_level=2) if norm_rows else pd.DataFrame()
+                    df_evi  = pd.DataFrame(ev_rows)
+                    df_cfg  = pd.DataFrame(cfg_rows)
+                    df_raw  = pd.DataFrame(raw_rows)
+
+                    if not df_norm.empty and 'aspect_scores.quality_flags' in df_norm.columns:
+                        _risk=[]; _score=[]
+                        for flags in df_norm['aspect_scores.quality_flags'].tolist():
+                            r,s = _quality_indices(flags); _risk.append(r); _score.append(s)
+                        df_norm['quality_risk_index'] = _risk; df_norm['quality_score'] = _score
+
+                    df_stab = compute_stability_metrics(df_norm, df_evi)
+
+                    try:
+                        with pd.ExcelWriter(out_xlsx, engine="openpyxl") as xlw:
+                            if not df_runs.empty:  df_runs.to_excel(excel_writer=xlw, sheet_name="Runs", index=False)
+                            if not df_norm.empty:  df_norm.to_excel(excel_writer=xlw, sheet_name="Normalized", index=False)
+                            if not df_evi.empty:   df_evi.to_excel(excel_writer=xlw, sheet_name="Evidence", index=False)
+                            if not df_cfg.empty:   df_cfg.to_excel(excel_writer=xlw, sheet_name="Config", index=False)
+                            if "df_raw" in locals() and not df_raw.empty:   df_raw.to_excel(excel_writer=xlw, sheet_name="RawAnswers", index=False)
+                            if "df_stab" in locals() and df_stab is not None and not df_stab.empty:
+                                df_stab.to_excel(excel_writer=xlw, sheet_name="Stability_Metrics", index=False)
+                    except Exception as ex:
+                        dbg("export_error", str(ex))
+                        # Do not raise here, allow the loop to continue and log error
+                        pass
+                    # --- Incremental Export --- End
+
                     # small pause to avoid overwhelming rate limits
                     time.sleep(0.12)
 
@@ -1163,7 +1192,9 @@ def run_pipeline(
         # after finishing question
     # end question loop
 
-    
+    dbg("export_done", out_xlsx) # This dbg call moved here to indicate final export is done
+    return {"out": out_xlsx, "runs": len(runs_rows), "norm": len(norm_rows), "evi": len(ev_rows)}
+
 def _sentiment_label_from_score(x: Optional[float]) -> str:
     if x is None: return "unknown"
     try:
@@ -1260,46 +1291,3 @@ def compute_stability_metrics(df_norm: pd.DataFrame, df_evi: pd.DataFrame) -> pd
         })
         rows.append(d)
     return pd.DataFrame(rows)
-
-# ---------- Export (pandas 3.0 keyword-only)
-    df_runs = pd.DataFrame(runs_rows)
-    df_norm = pd.json_normalize(norm_rows, max_level=2) if norm_rows else pd.DataFrame()
-    df_evi  = pd.DataFrame(ev_rows)
-    df_cfg  = pd.DataFrame(cfg_rows)
-    df_raw  = pd.DataFrame(raw_rows)
-
-    # Per-run quality indices on Normalized
-    if not df_norm.empty and 'aspect_scores.quality_flags' in df_norm.columns:
-        _risk=[]; _score=[]
-        for flags in df_norm['aspect_scores.quality_flags'].tolist():
-            r,s = _quality_indices(flags); _risk.append(r); _score.append(s)
-        df_norm['quality_risk_index'] = _risk; df_norm['quality_score'] = _score
-
-    # Stability metrics across runs
-    df_stab = compute_stability_metrics(df_norm, df_evi)
-    
-    dbg("export_start", f"Schreibe Excel: {out_xlsx}")
-    try:
-        with pd.ExcelWriter(out_xlsx, engine="openpyxl") as xlw:
-            if not df_runs.empty:  df_runs.to_excel(excel_writer=xlw, sheet_name="Runs", index=False)
-            if not df_norm.empty:  df_norm.to_excel(excel_writer=xlw, sheet_name="Normalized", index=False)
-            if not df_evi.empty:   df_evi.to_excel(excel_writer=xlw, sheet_name="Evidence", index=False)
-            if not df_cfg.empty:   df_cfg.to_excel(excel_writer=xlw, sheet_name="Config", index=False)
-            if not df_raw.empty:   df_raw.to_excel(excel_writer=xlw, sheet_name="RawAnswers", index=False)
-            if "df_stab" in locals() and df_stab is not None and not df_stab.empty:
-                df_stab.to_excel(excel_writer=xlw, sheet_name="Stability_Metrics", index=False)
-    except Exception as ex:
-        dbg("export_error", str(ex))
-        raise
-    dbg("export_done", out_xlsx)
-    return {"out": out_xlsx, "runs": len(df_runs), "norm": len(df_norm), "evi": len(df_evi)}
-
-# ---- final return guard ----
-try:
-    _out = out_xlsx if 'out_xlsx' in locals() else ""
-    _runs = len(df_runs) if 'df_runs' in locals() else 0
-    _norm = len(df_norm) if 'df_norm' in locals() else 0
-    _evi  = len(df_evi)  if 'df_evi'  in locals() else 0
-    return {"out": _out, "runs": _runs, "norm": _norm, "evi": _evi}
-except Exception:
-    return {"out": "", "runs": 0, "norm": 0, "evi": 0}
