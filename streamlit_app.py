@@ -236,8 +236,7 @@ def start_worker():
             q.put(ev)
             if log_path:
                 with open(log_path, "a", encoding="utf-8") as f:
-                    f.write(json.dumps(ev, ensure_ascii=False) + "
-")
+                    f.write(json.dumps(ev, ensure_ascii=False) + "")
         except Exception:
             pass
 
